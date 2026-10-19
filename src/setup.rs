@@ -70,7 +70,7 @@ const LOCAL_TEST_GIMBAL_PITCH_RAD: f32 = -0.16;
 const ENERGY_TEST_SPAWN: Vec3 = Vec3::new(0.0, 1.0, -5.6);
 const ENERGY_TEST_YAW_RAD: f32 = PI;
 const ENERGY_TEST_GIMBAL_YAW_RAD: f32 = 0.0;
-const ENERGY_TEST_GIMBAL_PITCH_RAD: f32 = -0.16;
+const ENERGY_TEST_GIMBAL_PITCH_RAD: f32 = 0.0;
 const OUTPOST_TEST_SPAWN: Vec3 = Vec3::new(-3.06, 1.0, -1.2);
 const OUTPOST_TEST_GIMBAL_PITCH_RAD: f32 = -0.26;
 const SHOOTING_RANGE_PLAYER_SPAWN: Vec3 = Vec3::new(-5.8, 1.0, -5.4);
@@ -805,7 +805,7 @@ fn spawn_main_camera(commands: &mut Commands, config: &SimulationConfig) {
     #[cfg(any(feature = "ros2", feature = "talos"))]
     let primary_egui_on_main_camera = !config.preview.enabled;
     #[cfg(not(any(feature = "ros2", feature = "talos")))]
-    let primary_egui_on_main_camera = true;
+    let primary_egui_on_main_camera = !config.preview.enabled;
     if primary_egui_on_main_camera {
         main_camera.insert(PrimaryEguiContext);
     }

@@ -23,4 +23,5 @@ pub enum FollowingType {
     Free,
     Robot,
     ThirdPerson,
+    TopDown,
 }

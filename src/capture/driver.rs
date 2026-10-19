@@ -25,6 +25,10 @@ use std::time::Instant;
 // This bounds only records waiting to be mapped; detached map/convert/handler work is tracked below.
 const MAX_QUEUED_FRAMES: usize = 2;
 const MAX_FAST_READBACK_BUFFERS: usize = 3;
+// UMA systems (Intel iGPU, AMD APU) share memory between CPU and GPU, so staging
+// buffer allocation is cheaper and map_async is essentially zero-copy. We can
+// afford more in-flight buffers to reduce synchronization stalls.
+const MAX_FAST_READBACK_BUFFERS_UMA: usize = 5;
 static CAPTURE_COPY_SUBMIT_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CAPTURE_QUEUE_DROP_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CAPTURE_PROCESSING_COMPLETE_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -385,9 +389,21 @@ struct FastReadbackSlotState {
     allocated: usize,
     in_flight: usize,
     max_in_flight: usize,
+    max_buffers: usize,
 }
 
 impl FastReadbackSlotState {
+    fn new(uma: bool) -> Self {
+        Self {
+            max_buffers: if uma {
+                MAX_FAST_READBACK_BUFFERS_UMA
+            } else {
+                MAX_FAST_READBACK_BUFFERS
+            },
+            ..Default::default()
+        }
+    }
+
     fn try_reserve(&mut self, has_reusable_buffer: bool) -> Option<FastReadbackReservation> {
         let reservation = if has_reusable_buffer {
             assert!(
@@ -395,7 +411,7 @@ impl FastReadbackSlotState {
                 "a reusable fast buffer must already be allocated and idle"
             );
             FastReadbackReservation::Reuse
-        } else if self.allocated < MAX_FAST_READBACK_BUFFERS {
+        } else if self.allocated < self.max_buffers {
             self.allocated += 1;
             FastReadbackReservation::Allocate
         } else {
@@ -426,12 +442,20 @@ struct FastReadbackPoolInner {
     free_buffers: Vec<Buffer>,
 }
 
-#[derive(Default)]
 struct FastReadbackPool {
     inner: Mutex<FastReadbackPoolInner>,
 }
 
 impl FastReadbackPool {
+    fn new(uma: bool) -> Self {
+        Self {
+            inner: Mutex::new(FastReadbackPoolInner {
+                slots: FastReadbackSlotState::new(uma),
+                free_buffers: Vec::new(),
+            }),
+        }
+    }
+
     fn try_acquire(
         self: &Arc<Self>,
         render_device: &RenderDevice,
@@ -621,13 +645,14 @@ impl ImageCopier {
         config: CaptureConfig,
         src_image: Handle<Image>,
         snapshots: Arc<Vec<ToSyncSnapshot>>,
+        uma: bool,
     ) -> ImageCopier {
         ImageCopier {
             config,
             src_image,
             queue: Mutex::new(VecDeque::new()),
             free_buffers: Arc::new(Mutex::new(Vec::new())),
-            fast_readback_pool: Arc::new(FastReadbackPool::default()),
+            fast_readback_pool: Arc::new(FastReadbackPool::new(uma)),
             snapshots,
         }
     }
@@ -1247,6 +1272,12 @@ impl Plugin for CameraCapturePlugin {
             app.insert_resource(self.config.clone());
         }
 
+        let uma = app
+            .world()
+            .get_resource::<crate::gpu_selector::GpuAdapterInfo>()
+            .map(|info| info.is_uma)
+            .unwrap_or(false);
+
         let render_app = app.sub_app_mut(RenderApp);
         render_app.world_mut().init_resource::<ImageCopiers>();
         render_app
@@ -1259,6 +1290,7 @@ impl Plugin for CameraCapturePlugin {
                 self.config.clone(),
                 self.handle.clone(),
                 self.snapshots.clone(),
+                uma,
             ));
         }
 
@@ -1469,7 +1501,7 @@ mod tests {
     fn fast_readback_slots_cap_three_and_the_fourth_request_is_counted_as_a_drop() {
         let _guard = FAST_COUNTER_TEST_LOCK.lock().unwrap();
         let counters_before = capture_pipeline_counters();
-        let mut slots = FastReadbackSlotState::default();
+        let mut slots = FastReadbackSlotState::new(false);
 
         for _ in 0..3 {
             assert_eq!(
@@ -1546,7 +1578,7 @@ mod tests {
         // reserved and its GPU copy submitted before the legacy insertion
         // evicts it. Retirement closes both the in-flight lease and allocation
         // slot; it must not create an idle/reusable fast slot.
-        let mut slots = FastReadbackSlotState::default();
+        let mut slots = FastReadbackSlotState::new(false);
         assert_eq!(
             slots.try_reserve(false),
             Some(FastReadbackReservation::Allocate)

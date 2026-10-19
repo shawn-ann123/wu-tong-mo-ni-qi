@@ -4,6 +4,7 @@ mod capture;
 mod components;
 mod config;
 mod dataset;
+mod gpu_selector;
 mod handler;
 mod integrated_auto_aim;
 mod network_bridge;
@@ -24,8 +25,7 @@ use avian3d::prelude::*;
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
-use bevy::render::settings::{InstanceFlags, RenderCreation, WgpuSettings, WgpuSettingsPriority};
-use bevy::render::{RenderPlugin, RenderSystems};
+use bevy::render::RenderSystems;
 use bevy::window::{ExitCondition, PresentMode, WindowPosition, WindowResolution};
 use bevy::winit::{WinitPlugin, WinitSettings};
 use bevy_inspector_egui::bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -57,16 +57,20 @@ use crate::setup::{
 };
 use crate::statistic::ProjectileStatistics;
 use crate::systems::{
-    ChassisObservationFrame, GameplaySystems, PreviousKinematicState, auto_aim_switch,
-    change_appearance, cleanup_projectiles, dart_launch, export_debug_stats, following_controls,
-    freecam_controls, gimbal_controls, mark_main_schedule_begin, mark_main_schedule_end,
-    mark_physics_step, mark_physics_step_begin, mouse_gimbal_controls, projectile_aerodynamics,
-    projectile_launch, remote_gimbal_controls, remote_vehicle_controls, run_auto_aim_debug_ui_app,
-    scene_mode_control_panel, scene_mode_keyboard_shortcuts, screenshot_on_f2, screenshot_saving,
+    ChassisObservationFrame, DebugWindowContextPass, DebugWindowState, GameplaySystems,
+    PreviousKinematicState, SpawnSelectionState, TelemetryWindowState,
+    apply_spawn_position, auto_aim_switch, change_appearance, cleanup_projectiles, dart_launch,
+    export_debug_stats, following_controls, freecam_controls, gimbal_controls,
+    mark_main_schedule_begin, mark_main_schedule_end, mark_physics_step, mark_physics_step_begin,
+    mouse_gimbal_controls, projectile_aerodynamics, projectile_launch, remote_gimbal_controls,
+    remote_vehicle_controls, run_auto_aim_debug_ui_app, scene_mode_control_panel,
+    scene_mode_keyboard_shortcuts, screenshot_on_f2, screenshot_saving, setup_debug_window,
     setup_projectile, shooting_range_control_window, shooting_range_debug_panel,
-    spawn_scene_mode_button_panel, switch_slapper_control, toggle_shooting_range_control_window,
-    uav_launch, update_chassis_observation, update_frequency_metrics, update_help_text,
-    vehicle_controls,
+    spawn_scene_mode_button_panel, spawn_click_detection, spawn_cursor_tracking,
+    spawn_selection_init, spawn_selection_ui, switch_slapper_control,
+    telemetry_window_system, toggle_debug_window, toggle_shooting_range_control_window,
+    top_down_camera_system, uav_launch, update_chassis_observation, update_frequency_metrics,
+    update_help_text, vehicle_controls,
 };
 use crate::systems::{
     FrequencyMetrics, MainScheduleTiming, PhysicsScheduleTiming, ShootingRangeControlState,
@@ -106,28 +110,8 @@ fn present_mode_from_config(value: &str) -> Option<PresentMode> {
     }
 }
 
-fn is_wsl() -> bool {
-    std::env::var_os("WSL_DISTRO_NAME").is_some()
-        || std::env::var_os("WSL_INTEROP").is_some()
-        || std::fs::read_to_string("/proc/sys/kernel/osrelease")
-            .map(|release| release.to_ascii_lowercase().contains("microsoft"))
-            .unwrap_or(false)
-}
-
-fn render_plugin_for_platform() -> RenderPlugin {
-    if cfg!(target_os = "linux") && is_wsl() {
-        return RenderPlugin {
-            render_creation: RenderCreation::Automatic(Box::new(WgpuSettings {
-                instance_flags: InstanceFlags::default()
-                    | InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER,
-                priority: WgpuSettingsPriority::Functionality,
-                ..default()
-            })),
-            ..default()
-        };
-    }
-
-    RenderPlugin::default()
+fn render_plugin_for_platform() -> gpu_selector::GpuSelectionResult {
+    gpu_selector::render_plugin_with_gpu_selection()
 }
 
 fn fixed_time_from_config(config: &SimulationConfig) -> Time<Fixed> {
@@ -398,6 +382,7 @@ fn main() {
         let config = SimulationConfig::default();
 
         let mut app = App::new();
+        let gpu_result = render_plugin_for_platform();
         app.add_plugins((
             DefaultPlugins
                 .set(WindowPlugin {
@@ -409,9 +394,12 @@ fn main() {
                     file_path: simulator_asset_folder(),
                     ..default()
                 })
-                .set(render_plugin_for_platform()),
+                .set(gpu_result.render_plugin),
             physics_plugins_from_config(&config),
         ));
+        if let Some(adapter_info) = gpu_result.adapter_info {
+            app.insert_resource(adapter_info);
+        }
         configure_physics_runtime(&mut app, &config);
         app.add_plugins(RoboMasterPlugins)
             .add_plugins(ConfigPlugin)
@@ -441,6 +429,7 @@ fn main() {
     let mut app = App::new();
     // The simulator must keep advancing at full speed when a benchmark window is unfocused.
     app.insert_resource(WinitSettings::continuous());
+    let gpu_result = render_plugin_for_platform();
     let default_plugins = DefaultPlugins
         .set(WindowPlugin {
             primary_window: primary_window_for_mode(disable_performance_ui, present_mode),
@@ -451,7 +440,10 @@ fn main() {
             file_path: simulator_asset_folder(),
             ..default()
         })
-        .set(render_plugin_for_platform());
+        .set(gpu_result.render_plugin);
+    if let Some(adapter_info) = gpu_result.adapter_info {
+        app.insert_resource(adapter_info);
+    }
     if performance_mode_uses_winit(disable_performance_ui) {
         app.add_plugins(default_plugins);
     } else {
@@ -484,6 +476,9 @@ fn main() {
         .init_resource::<ShootingRangeControlState>()
         .init_resource::<ShootingRangeDebugPanelState>()
         .init_resource::<ShootingRangeDebugProcessState>()
+        .init_resource::<TelemetryWindowState>()
+        .init_resource::<SpawnSelectionState>()
+        .init_resource::<DebugWindowState>()
         .insert_resource(truth_gimbal_config)
         .insert_resource(truth_gimbal_stats)
         .insert_resource(AutoAimSceneState::new(initial_scene_mode))
@@ -498,7 +493,7 @@ fn main() {
             config.projectile.cooldown,
             TimerMode::Once,
         )))
-        .add_systems(Startup, (setup, setup_projectile))
+        .add_systems(Startup, (setup, setup_projectile, setup_debug_window))
         .add_systems(
             Startup,
             spawn_scene_mode_button_panel.run_if(|| !performance_ui_disabled()),
@@ -537,6 +532,10 @@ fn main() {
                     scene_mode_keyboard_shortcuts,
                     handle_scene_mode_button_interactions,
                     toggle_shooting_range_control_window,
+                    toggle_debug_window,
+                    spawn_selection_init,
+                    spawn_cursor_tracking,
+                    spawn_click_detection,
                     receive_scene_control_commands,
                 )
                     .in_set(GameplaySystems::Input),
@@ -555,8 +554,10 @@ fn main() {
                 // Camera phase
                 (
                     freecam_controls.run_if(|mode: Res<CameraMode>| mode.0 == FollowingType::Free),
+                    top_down_camera_system.run_if(|mode: Res<CameraMode>| mode.0 == FollowingType::TopDown),
                     systems::update_camera_follow
-                        .run_if(|mode: Res<CameraMode>| mode.0 != FollowingType::Free),
+                        .run_if(|mode: Res<CameraMode>| mode.0 != FollowingType::Free && mode.0 != FollowingType::TopDown),
+                    apply_spawn_position,
                 )
                     .in_set(GameplaySystems::Camera)
                     .before(RenderSystems::Render),
@@ -609,11 +610,13 @@ fn main() {
 
     if !disable_performance_ui {
         app.add_systems(
-            EguiPrimaryContextPass,
+            DebugWindowContextPass,
             (
                 scene_mode_control_panel,
                 shooting_range_control_window,
                 shooting_range_debug_panel,
+                telemetry_window_system,
+                spawn_selection_ui,
             )
                 .chain(),
         );

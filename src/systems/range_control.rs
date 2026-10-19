@@ -540,8 +540,12 @@ pub fn scene_mode_control_panel(
     mut contexts: EguiContexts,
     mut scene_state: ResMut<AutoAimSceneState>,
     mut range_control: ResMut<ShootingRangeControlState>,
+    debug_window: Res<super::DebugWindowState>,
 ) {
-    let Ok(ctx) = contexts.ctx_mut() else {
+    let Some(camera_entity) = debug_window.camera_entity else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_for_entity_mut(camera_entity) else {
         return;
     };
 
@@ -1230,12 +1234,16 @@ pub fn shooting_range_control_window(
     mut contexts: EguiContexts,
     mut state: ResMut<ShootingRangeControlState>,
     targets: Query<(&ShootingRangeTarget, Option<&ActiveSlapper>)>,
+    debug_window: Res<super::DebugWindowState>,
 ) {
     if !state.open {
         return;
     }
 
-    let Ok(ctx) = contexts.ctx_mut() else {
+    let Some(camera_entity) = debug_window.camera_entity else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_for_entity_mut(camera_entity) else {
         return;
     };
 
@@ -1363,6 +1371,7 @@ pub fn shooting_range_debug_panel(
     stats: Res<ProjectileStatistics>,
     targets: Query<(), With<ShootingRangeTarget>>,
     mut state: ResMut<ShootingRangeDebugPanelState>,
+    debug_window: Res<super::DebugWindowState>,
 ) {
     if targets.iter().next().is_none() {
         return;
@@ -1370,7 +1379,10 @@ pub fn shooting_range_debug_panel(
 
     refresh_debug_telemetry(&time, &mut state);
 
-    let Ok(ctx) = contexts.ctx_mut() else {
+    let Some(camera_entity) = debug_window.camera_entity else {
+        return;
+    };
+    let Ok(ctx) = contexts.ctx_for_entity_mut(camera_entity) else {
         return;
     };
 

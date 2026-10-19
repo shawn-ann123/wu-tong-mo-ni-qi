@@ -15,7 +15,8 @@ pub fn following_controls(mut mode: ResMut<CameraMode>, keyboard: Res<ButtonInpu
         mode.0 = match mode.0 {
             FollowingType::Free => FollowingType::Robot,
             FollowingType::Robot => FollowingType::ThirdPerson,
-            FollowingType::ThirdPerson => FollowingType::Free,
+            FollowingType::ThirdPerson => FollowingType::TopDown,
+            FollowingType::TopDown => FollowingType::Free,
         };
     }
 }
@@ -51,7 +52,7 @@ pub fn update_camera_follow(
             camera_transform.translation = base_transform.translation + offset;
             camera_transform.look_at(base_transform.translation, Vec3::Y);
         }
-        FollowingType::Free => {}
+        FollowingType::Free | FollowingType::TopDown => {}
     }
 }
 

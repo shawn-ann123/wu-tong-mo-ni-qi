@@ -15,7 +15,7 @@ pub(crate) struct HelpText;
 
 fn create_help_text(auto_aim: bool, bridge_status: &str, stats: &ProjectileStatistics) -> Text {
     format!(
-        "auto-aim={} bridge={} total={} accurate={} pct={:.2}\nControls: F2-Screenshot F3-Camera F5-Auto Aim F6-Range Panel F7-Normal F8-Range F9-Energy F10-Small Rune F11-Large Rune F12-Close Rune | Space-Fire | WASD-Move Arrows/RMB-Gimbal",
+        "auto-aim={} bridge={} total={} accurate={} pct={:.2}\nControls: ` -Debug Window F1-Spawn F2-Screenshot F3-Camera F4-Telemetry F5-Auto Aim F6-Range Panel F8-Range F9-Energy F10-Small Rune F11-Large Rune F12-Close Rune | Space-Fire | WASD-Move Arrows/RMB-Gimbal",
         if auto_aim { "ON " } else { "OFF" },
         bridge_status,
         stats.launch_count,

@@ -1,5 +1,6 @@
 /target
 /target-integrated-talos
+/package
 *.stp
 .DS_Store
 assets_old
@@ -13,3 +14,5 @@ screenshot-*.png
 /build/
 build.sh
 env.sh
+*.pdb
+*.dSYM/
