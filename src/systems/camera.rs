@@ -1,14 +1,12 @@
 use bevy::input::mouse::MouseMotion;
 use bevy::prelude::*;
-use std::f32::consts::PI;
 
+use crate::ballistics_config::BallisticsConfig;
 use crate::components::{
-    CameraMode, Controlled, FollowingType, Infantry, InfantryGimbal, InfantryLaunchOffset,
-    InfantryViewOffset, MainCamera,
+    CameraMode, Controlled, FollowingType, Infantry, InfantryGimbal, MainCamera,
 };
 use crate::config::SimulationConfig;
-
-pub(crate) const ROBOT_CAMERA_FORWARD_CLEARANCE: f32 = 0.2;
+use crate::frames::camera_from_gimbal;
 
 pub fn following_controls(mut mode: ResMut<CameraMode>, keyboard: Res<ButtonInput<KeyCode>>) {
     if keyboard.just_pressed(KeyCode::F3) {
@@ -25,8 +23,7 @@ pub fn update_camera_follow(
     camera_query: Single<(&mut Transform, &MainCamera), Without<Controlled>>,
     infantry: Single<&Transform, (With<Infantry>, With<Controlled>)>,
     gimbal: Single<&Transform, (With<Controlled>, With<InfantryGimbal>)>,
-    _view_offset: Single<&Transform, (With<Controlled>, With<InfantryViewOffset>)>,
-    launch_offset: Single<&Transform, (With<Controlled>, With<InfantryLaunchOffset>)>,
+    ballistics: Res<BallisticsConfig>,
     mode: Res<CameraMode>,
 ) {
     let gimbal_transform = gimbal.into_inner();
@@ -34,17 +31,14 @@ pub fn update_camera_follow(
 
     match mode.0 {
         FollowingType::Robot => {
-            let launch_offset_transform = launch_offset.into_inner();
+            // Camera-to-gimbal extrinsic: the camera is mounted on the gimbal.
+            // Rotation maps the gimbal frame to the Bevy camera frame so the
+            // optical axis (+Z_camera) follows the gimbal forward (+X_gimbal).
             let gimbal_world_rotation = infantry.rotation * gimbal_transform.rotation;
-            let camera_local = launch_offset_transform.translation
-                + launch_offset_transform.rotation.mul_vec3(Vec3::Y)
-                    * ROBOT_CAMERA_FORWARD_CLEARANCE;
-            let camera_world = gimbal_world_rotation * camera_local;
-
-            camera_transform.translation = infantry.translation + camera_world;
-            camera_transform.rotation = gimbal_world_rotation
-                * launch_offset_transform.rotation
-                * Quat::from_euler(EulerRot::ZYX, 0.0, 0.0, PI / 2.0)
+            let cam_offset_gimbal = Vec3::from_array(ballistics.camera_offset);
+            camera_transform.translation =
+                infantry.translation + gimbal_world_rotation * cam_offset_gimbal;
+            camera_transform.rotation = gimbal_world_rotation * camera_from_gimbal();
         }
         FollowingType::ThirdPerson => {
             let base_transform = infantry.into_inner();
@@ -107,5 +101,57 @@ pub fn freecam_controls(
     }
     if keyboard.pressed(KeyCode::KeyJ) {
         camera_transform.translation -= up * speed;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::robomaster::prelude::{INFANTRY_THREE_CONFIG, Team};
+
+    #[test]
+    fn robot_camera_follows_gimbal_forward_with_configured_offset() {
+        let mut app = App::new();
+        app.insert_resource(BallisticsConfig::default())
+            .insert_resource(CameraMode(FollowingType::Robot))
+            .add_systems(Update, update_camera_follow);
+
+        let player_translation = Vec3::new(10.0, 0.0, -2.0);
+        let player_rotation = Quat::from_rotation_y(0.5);
+        let gimbal_local_rotation = Quat::from_euler(EulerRot::YXZ, 0.3, 0.2, 0.0);
+
+        app.world_mut().spawn((
+            Infantry::new(Team::Red, INFANTRY_THREE_CONFIG),
+            Controlled,
+            Transform::from_translation(player_translation).with_rotation(player_rotation),
+        ));
+        app.world_mut().spawn((
+            Controlled,
+            InfantryGimbal::default(),
+            Transform::from_rotation(gimbal_local_rotation),
+        ));
+        app.world_mut().spawn((
+            MainCamera {
+                follow_offset: Vec3::new(0.0, 3.0, 2.0),
+            },
+            Transform::default(),
+        ));
+        app.update();
+
+        let gimbal_world_rotation = player_rotation * gimbal_local_rotation;
+        let offset = Vec3::from_array(BallisticsConfig::default().camera_offset);
+
+        let mut query = app.world_mut().query_filtered::<&Transform, With<MainCamera>>();
+        let camera = query.single(app.world()).expect("camera exists");
+
+        let expected_translation = player_translation + gimbal_world_rotation * offset;
+        assert!(camera.translation.distance(expected_translation) < 1e-5);
+
+        // Optical axis (Bevy camera forward = -Z) follows the gimbal forward.
+        let expected_forward = (gimbal_world_rotation * crate::frames::GIMBAL_FORWARD).normalize();
+        assert!(camera.forward().distance(expected_forward) < 1e-5);
+        // Screen up follows the gimbal up.
+        let expected_up = (gimbal_world_rotation * crate::frames::GIMBAL_UP).normalize();
+        assert!(camera.up().distance(expected_up) < 1e-5);
     }
 }

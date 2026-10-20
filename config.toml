@@ -88,11 +88,9 @@ half_wheelbase_m = 0.18         # half of front-rear wheel spacing (m)
 half_trackwidth_m = 0.15        # half of left-right wheel spacing (m)
 
 [projectile]
+# Muzzle speed, projectile mass/diameter and dart constants live in ballistics.yaml.
 lifetime = 5.0                  # seconds - projectile lifetime
-speed = 25.0                    # m/s - initial speed
 cooldown = 0.05                  # seconds - fire cooldown
-diameter = 0.017                # meters - projectile diameter (17mm)
-mass = 0.0032                    # kg - projectile mass (17g)
 friction = 1.1                  # friction coefficient
 linear_damping = 0.0            # linear damping (set to 0 for physics-based drag below)
 uav_vel = 5.0

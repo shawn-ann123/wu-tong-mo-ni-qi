@@ -42,6 +42,7 @@ pub fn telemetry_window_system(
     egui::Window::new("Vehicle Truth Values")
         .resizable(true)
         .default_width(380.0)
+        .default_pos(egui::pos2(500.0, 380.0))
         .show(ctx, |ui| {
             ui.heading("Real-time Truth Table");
             ui.separator();

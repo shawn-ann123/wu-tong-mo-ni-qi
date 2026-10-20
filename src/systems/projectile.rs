@@ -2,12 +2,13 @@ use avian3d::prelude::*;
 use bevy::prelude::*;
 use core::f32::consts::PI;
 
+use crate::ballistics_config::BallisticsConfig;
 use crate::components::{
     Controlled, DartLaunch, DartProjectile, DartSetting, GameLayer, Infantry, InfantryChassis,
-    InfantryGimbal, InfantryLaunchOffset, ProjectileCooldown, ProjectileLifetime,
-    ProjectileSetting,
+    InfantryGimbal, ProjectileCooldown, ProjectileLifetime, ProjectileSetting,
 };
 use crate::config::SimulationConfig;
+use crate::frames::GIMBAL_FORWARD;
 use crate::robomaster::prelude::{Armor, ArmorRoot, Projectile};
 use crate::statistic::ProjectileStatistics;
 use crate::telemetry::{
@@ -17,13 +18,13 @@ use crate::telemetry::{
 
 pub fn setup_projectile(
     mut commands: Commands,
-    config: Res<SimulationConfig>,
+    ballistics: Res<BallisticsConfig>,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.insert_resource(ProjectileSetting(
-        meshes.add(Sphere::new(config.projectile.diameter / 2.0)),
+        meshes.add(Sphere::new(ballistics.projectile_diameter_m / 2.0)),
         materials.add(StandardMaterial {
             base_color: Color::srgba(0.132866, 1.0, 0.132869, 0.85),
             emissive: LinearRgba::new(0.132866, 1.0, 0.132869, 0.85),
@@ -44,18 +45,14 @@ pub fn projectile_launch(
     mut telemetry: ResMut<ProjectileTelemetry>,
     pending_auto_aim: Option<Res<PendingAutoAimShotContext>>,
     config: Res<SimulationConfig>,
-    _asset_server: Res<AssetServer>,
+    ballistics: Res<BallisticsConfig>,
     mut commands: Commands,
     setting: Res<ProjectileSetting>,
-    infantry: Single<
-        (&Transform, &LinearVelocity, &AngularVelocity),
-        (With<Infantry>, With<Controlled>),
-    >,
+    infantry: Single<(&LinearVelocity, &AngularVelocity), (With<Infantry>, With<Controlled>)>,
     gimbal: Single<
         (&GlobalTransform, &InfantryGimbal),
         (With<Controlled>, Without<InfantryChassis>),
     >,
-    launch_offset: Single<&Transform, (With<Controlled>, With<InfantryLaunchOffset>)>,
 ) {
     cooldown.tick(time.delta());
     if !cooldown.is_finished() {
@@ -71,14 +68,15 @@ pub fn projectile_launch(
         commands.remove_resource::<PendingAutoAimShotContext>();
     }
 
-    let direction = (gimbal.0.rotation() * launch_offset.rotation)
-        .mul_vec3(Vec3::Y)
-        .normalize_or_zero();
+    // Muzzle velocity follows the gimbal frame +X (forward). In the Bevy-aligned
+    // gimbal node frame that is -Z, exposed as GIMBAL_FORWARD.
+    let direction = gimbal.0.rotation().mul_vec3(GIMBAL_FORWARD).normalize_or_zero();
     if direction == Vec3::ZERO {
         return;
     }
-    let vel = infantry.1.0 + direction * config.projectile.speed;
-    let position = infantry.0.translation + (gimbal.0.rotation() * launch_offset.translation);
+    let vel = infantry.0.0 + direction * ballistics.muzzle_speed_mps;
+    // Spawn at the gimbal origin, not the camera optical axis.
+    let position = gimbal.0.translation();
     let (gimbal_yaw, gimbal_pitch, _) = gimbal.0.rotation().to_euler(EulerRot::YXZ);
     stats.increase_launch();
     let trace = ProjectileTrace {
@@ -101,8 +99,8 @@ pub fn projectile_launch(
     telemetry.write_launch(&trace);
     commands.spawn((
         RigidBody::Dynamic,
-        Collider::sphere(config.projectile.diameter / 2.0),
-        Mass(config.projectile.mass),
+        Collider::sphere(ballistics.projectile_diameter_m / 2.0),
+        Mass(ballistics.projectile_mass_kg),
         Friction::new(config.projectile.friction),
         Restitution::new(0.3),
         LinearDamping(config.projectile.linear_damping),
@@ -110,7 +108,7 @@ pub fn projectile_launch(
         Mesh3d(setting.0.clone()),
         MeshMaterial3d(setting.1.clone()),
         LinearVelocity(vel),
-        AngularVelocity(infantry.2.0),
+        AngularVelocity(infantry.1.0),
         Transform::IDENTITY.with_translation(position),
         ProjectileLifetime(Timer::from_seconds(
             config.projectile.lifetime,
@@ -124,6 +122,7 @@ pub fn projectile_launch(
 
 pub fn projectile_aerodynamics(
     config: Res<SimulationConfig>,
+    ballistics: Res<BallisticsConfig>,
     mut projectiles: Query<Forces, (With<Projectile>, Without<DartProjectile>)>,
 ) {
     let aero = &config.projectile.aerodynamics;
@@ -131,7 +130,7 @@ pub fn projectile_aerodynamics(
         return;
     }
 
-    let diameter = config.projectile.diameter;
+    let diameter = ballistics.projectile_diameter_m;
     if diameter <= 0.0 {
         return;
     }
@@ -158,6 +157,7 @@ pub fn projectile_aerodynamics(
 pub fn dart_launch(
     mut commands: Commands,
     config: Res<SimulationConfig>,
+    ballistics: Res<BallisticsConfig>,
     mut stats: ResMut<ProjectileStatistics>,
     setting: Res<DartSetting>,
     launchers: Query<&GlobalTransform, With<DartLaunch>>,
@@ -165,10 +165,6 @@ pub fn dart_launch(
     info!("Dart launch requested");
     const DART_FORWARD: Vec3 = Vec3::Y;
     const DART_MODEL_FORWARD: Vec3 = Vec3::NEG_Y;
-    const DART_SPEED_MPS: f32 = 17.0;
-    const DART_MASS_KG: f32 = 0.25;
-    const DART_COLLIDER_RADIUS_M: f32 = 0.001;
-    const DART_COLLIDER_LENGTH_M: f32 = 0.001;
     const DART_SPAWN_OFFSET_M: f32 = 0.00;
 
     let Ok(launcher) = launchers.single() else {
@@ -203,14 +199,14 @@ pub fn dart_launch(
     commands.spawn((
         RigidBody::Dynamic,
         voxel(0.005),
-        Mass(DART_MASS_KG),
+        Mass(ballistics.dart_mass_kg),
         Friction::new(config.projectile.friction),
         Restitution::new(0.55),
         LinearDamping(config.projectile.linear_damping),
         GameLayer::projectile_collision_layers(true),
         WorldAssetRoot(setting.0.clone()),
         transform,
-        LinearVelocity(direction * DART_SPEED_MPS),
+        LinearVelocity(direction * ballistics.dart_speed_mps),
         ProjectileLifetime(Timer::from_seconds(
             config.projectile.lifetime,
             TimerMode::Once,
@@ -254,11 +250,72 @@ pub fn cleanup_projectiles(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::robomaster::prelude::{INFANTRY_THREE_CONFIG, Team};
+
+    #[test]
+    fn projectile_spawns_at_gimbal_origin_along_gimbal_forward() {
+        let mut app = App::new();
+        app.insert_resource(SimulationConfig::default())
+            .insert_resource(BallisticsConfig::default())
+            .insert_resource(ProjectileStatistics::default())
+            .insert_resource(ProjectileTelemetry::from_env())
+            .insert_resource(ProjectileSetting(
+                Handle::<Mesh>::default(),
+                Handle::<StandardMaterial>::default(),
+            ))
+            .insert_resource(ProjectileCooldown(Timer::from_seconds(0.0, TimerMode::Once)))
+            .init_resource::<Time>()
+            .add_systems(Update, projectile_launch);
+
+        let gimbal_translation = Vec3::new(1.0, 2.0, 3.0);
+        let gimbal_rotation = Quat::from_euler(EulerRot::YXZ, 0.3, 0.2, 0.0);
+
+        app.world_mut().spawn((
+            Infantry::new(Team::Red, INFANTRY_THREE_CONFIG),
+            Controlled,
+            LinearVelocity(Vec3::ZERO),
+            AngularVelocity(Vec3::ZERO),
+        ));
+        app.world_mut().spawn((
+            Controlled,
+            InfantryGimbal::default(),
+            Transform::from_translation(gimbal_translation).with_rotation(gimbal_rotation),
+            GlobalTransform::from(
+                Transform::from_translation(gimbal_translation).with_rotation(gimbal_rotation),
+            ),
+        ));
+        app.update();
+
+        let mut query = app.world_mut().query_filtered::<
+            (&Transform, &LinearVelocity),
+            With<Projectile>,
+        >();
+        let projectiles: Vec<_> = query
+            .iter(app.world())
+            .map(|(transform, velocity)| (transform.translation, velocity.0))
+            .collect();
+        assert_eq!(projectiles.len(), 1);
+        let (position, velocity) = projectiles[0];
+
+        // Muzzle at the gimbal origin.
+        assert!(position.distance(gimbal_translation) < 1e-5);
+        // Muzzle direction along the gimbal forward axis (-Z in the node frame).
+        let expected_direction = (gimbal_rotation * crate::frames::GIMBAL_FORWARD).normalize();
+        let actual_direction = velocity.normalize();
+        assert!(
+            actual_direction.distance(expected_direction) < 1e-5,
+            "direction={actual_direction:?} expected={expected_direction:?}"
+        );
+        assert!(
+            (velocity.length() - BallisticsConfig::default().muzzle_speed_mps).abs() < 1e-4
+        );
+    }
 
     #[test]
     fn dart_launch_spawns_dart_projectile() {
         let mut app = App::new();
         app.insert_resource(SimulationConfig::default())
+            .insert_resource(BallisticsConfig::default())
             .insert_resource(ProjectileStatistics::default())
             .insert_resource(DartSetting(Handle::<WorldAsset>::default()))
             .add_systems(Update, dart_launch);

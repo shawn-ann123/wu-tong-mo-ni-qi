@@ -1,0 +1,16 @@
+# Ballistics & hardware constants — may vary per field device or robot model.
+# Reloaded on file change.
+
+# --- 17 mm projectile ---
+muzzle_speed_mps: 25.0       # muzzle velocity (m/s)
+projectile_mass_kg: 0.0032   # 17 mm projectile mass (kg)
+projectile_diameter_m: 0.017 # projectile diameter (m)
+
+# --- Dart ---
+dart_speed_mps: 17.0         # dart launch velocity (m/s)
+dart_mass_kg: 0.25           # dart mass (kg)
+
+# --- Camera offset (gimbal-node frame, meters) ---
+# Position of the camera sensor relative to the gimbal origin.
+# Default matches CAM_DIRECTION in vehicle.glb.
+camera_offset: [-0.002, 0.196, -0.06]

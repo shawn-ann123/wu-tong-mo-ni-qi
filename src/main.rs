@@ -1,9 +1,11 @@
 #![allow(dead_code)]
 mod auto_gen;
+mod ballistics_config;
 mod capture;
 mod components;
 mod config;
 mod dataset;
+mod frames;
 mod gpu_selector;
 mod handler;
 mod integrated_auto_aim;
@@ -40,6 +42,7 @@ use crate::capture::{
     ExposureWallTimestamp, advance_exposure_wall_timestamp, update_preview_cadence,
 };
 use crate::components::{CameraMode, FollowingType, ProjectileCooldown, SubscribeAutoAim};
+use crate::ballistics_config::BallisticsConfigPlugin;
 use crate::config::{ConfigPlugin, SimulationConfig};
 use crate::dataset::prelude::DatasetPlugin;
 use crate::handler::{on_activate, on_hit};
@@ -64,13 +67,13 @@ use crate::systems::{
     mark_main_schedule_begin, mark_main_schedule_end, mark_physics_step, mark_physics_step_begin,
     mouse_gimbal_controls, projectile_aerodynamics, projectile_launch, remote_gimbal_controls,
     remote_vehicle_controls, run_auto_aim_debug_ui_app, scene_mode_control_panel,
-    scene_mode_keyboard_shortcuts, screenshot_on_f2, screenshot_saving, setup_debug_window,
-    setup_projectile, shooting_range_control_window, shooting_range_debug_panel,
-    spawn_scene_mode_button_panel, spawn_click_detection, spawn_cursor_tracking,
-    spawn_selection_init, spawn_selection_ui, switch_slapper_control,
-    telemetry_window_system, toggle_debug_window, toggle_shooting_range_control_window,
-    top_down_camera_system, uav_launch, update_chassis_observation, update_frequency_metrics,
-    update_help_text, vehicle_controls,
+    scene_mode_controls_panel, scene_mode_keyboard_shortcuts, screenshot_on_f2,
+    screenshot_saving, setup_debug_window, setup_projectile, shooting_range_control_window,
+    shooting_range_debug_panel, shooting_range_endpoint_pick, spawn_scene_mode_button_panel,
+    spawn_click_detection, spawn_cursor_tracking, spawn_selection_init, spawn_selection_ui,
+    switch_slapper_control, telemetry_window_system, toggle_debug_window,
+    toggle_shooting_range_control_window, top_down_camera_system, uav_launch,
+    update_chassis_observation, update_frequency_metrics, update_help_text, vehicle_controls,
 };
 use crate::systems::{
     FrequencyMetrics, MainScheduleTiming, PhysicsScheduleTiming, ShootingRangeControlState,
@@ -463,6 +466,7 @@ fn main() {
     app.add_plugins(RoboMasterPlugins)
         .add_plugins(DatasetPlugin)
         .add_plugins(ConfigPlugin)
+        .add_plugins(BallisticsConfigPlugin)
         .add_plugins(NetworkBridgePlugin)
         .add_plugins(SceneControlPlugin)
         .init_resource::<CameraMode>()
@@ -536,6 +540,7 @@ fn main() {
                     spawn_selection_init,
                     spawn_cursor_tracking,
                     spawn_click_detection,
+                    shooting_range_endpoint_pick.after(spawn_click_detection),
                     receive_scene_control_commands,
                 )
                     .in_set(GameplaySystems::Input),
@@ -613,6 +618,7 @@ fn main() {
             DebugWindowContextPass,
             (
                 scene_mode_control_panel,
+                scene_mode_controls_panel,
                 shooting_range_control_window,
                 shooting_range_debug_panel,
                 telemetry_window_system,

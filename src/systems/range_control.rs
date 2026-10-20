@@ -12,8 +12,7 @@ use std::process::{Child, Command};
 
 use crate::capture::ExposureWallTimestamp;
 use crate::components::{
-    ActiveSlapper, Controlled, Infantry, InfantryGimbal, InfantryLaunchOffset, MainCamera,
-    SubscribeAutoAim,
+    ActiveSlapper, Controlled, Infantry, InfantryGimbal, MainCamera, SubscribeAutoAim,
 };
 use crate::integrated_auto_aim::IntegratedAutoAimBridge;
 use crate::setup::{
@@ -21,7 +20,7 @@ use crate::setup::{
 };
 use crate::statistic::ProjectileStatistics;
 
-const RANGE_TARGET_MAX_LINEAR_SPAN_M: f32 = 8.0;
+pub(crate) const RANGE_TARGET_MAX_LINEAR_SPAN_M: f32 = 8.0;
 const RANGE_TARGET_DEFAULT_LINEAR_SPAN_M: f32 = 8.0;
 const RANGE_TARGET_BOUNDARY_EPSILON_M: f32 = 1e-3;
 const TRUTH_GIMBAL_ENV: &str = "DAEDALUS_RANGE_TRUTH_GIMBAL_TARGET_NUMBER";
@@ -122,6 +121,8 @@ pub struct RangeTargetMotionSettings {
     pub linear_span_m: f32,
     pub spin_deg_s: f32,
     pub travel_sign: f32,
+    pub endpoint_a: Option<Vec3>,
+    pub endpoint_b: Option<Vec3>,
 }
 
 impl Default for RangeTargetMotionSettings {
@@ -133,8 +134,22 @@ impl Default for RangeTargetMotionSettings {
             linear_span_m: RANGE_TARGET_DEFAULT_LINEAR_SPAN_M,
             spin_deg_s: 0.0,
             travel_sign: 1.0,
+            endpoint_a: None,
+            endpoint_b: None,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeEndpoint {
+    A,
+    B,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RangeEndpointPick {
+    pub kind: ShootingRangeTargetKind,
+    pub endpoint: RangeEndpoint,
 }
 
 #[derive(Resource, Clone, Debug, PartialEq)]
@@ -142,6 +157,7 @@ pub struct ShootingRangeControlState {
     pub open: bool,
     pub armor_3: RangeTargetMotionSettings,
     pub armor_1: RangeTargetMotionSettings,
+    pub endpoint_pick: Option<RangeEndpointPick>,
 }
 
 impl Default for ShootingRangeControlState {
@@ -150,6 +166,7 @@ impl Default for ShootingRangeControlState {
             open: false,
             armor_3: default_motion_for_target(ShootingRangeTargetKind::Armor3),
             armor_1: default_motion_for_target(ShootingRangeTargetKind::Armor1),
+            endpoint_pick: None,
         }
     }
 }
@@ -185,9 +202,77 @@ impl ShootingRangeControlState {
             linear_span_m,
             spin_deg_s,
             travel_sign: 1.0,
+            endpoint_a: None,
+            endpoint_b: None,
         };
         Ok(())
     }
+
+    pub fn settings(&self, kind: ShootingRangeTargetKind) -> &RangeTargetMotionSettings {
+        match kind {
+            ShootingRangeTargetKind::Armor3 => &self.armor_3,
+            ShootingRangeTargetKind::Armor1 => &self.armor_1,
+        }
+    }
+
+    pub fn settings_mut(&mut self, kind: ShootingRangeTargetKind) -> &mut RangeTargetMotionSettings {
+        match kind {
+            ShootingRangeTargetKind::Armor3 => &mut self.armor_3,
+            ShootingRangeTargetKind::Armor1 => &mut self.armor_1,
+        }
+    }
+
+    pub fn set_endpoint(
+        &mut self,
+        kind: ShootingRangeTargetKind,
+        endpoint: RangeEndpoint,
+        position: Vec3,
+    ) {
+        let settings = self.settings_mut(kind);
+        let other = match endpoint {
+            RangeEndpoint::A => settings.endpoint_b,
+            RangeEndpoint::B => settings.endpoint_a,
+        };
+        let position = other
+            .map(|other| clamp_endpoint_span(other, position))
+            .unwrap_or(position);
+        match endpoint {
+            RangeEndpoint::A => settings.endpoint_a = Some(position),
+            RangeEndpoint::B => settings.endpoint_b = Some(position),
+        }
+        if let Some(other) = other {
+            let other = Vec3::new(other.x, position.y, other.z);
+            match endpoint.other() {
+                RangeEndpoint::A => settings.endpoint_a = Some(other),
+                RangeEndpoint::B => settings.endpoint_b = Some(other),
+            }
+        }
+    }
+
+    pub fn clear_endpoints(&mut self, kind: ShootingRangeTargetKind) {
+        let settings = self.settings_mut(kind);
+        settings.endpoint_a = None;
+        settings.endpoint_b = None;
+    }
+}
+
+impl RangeEndpoint {
+    fn other(self) -> Self {
+        match self {
+            Self::A => Self::B,
+            Self::B => Self::A,
+        }
+    }
+}
+
+fn clamp_endpoint_span(other: Vec3, position: Vec3) -> Vec3 {
+    let delta = Vec3::new(position.x - other.x, 0.0, position.z - other.z);
+    let distance = delta.length();
+    if distance <= RANGE_TARGET_MAX_LINEAR_SPAN_M {
+        return Vec3::new(position.x, other.y, position.z);
+    }
+    let clamped = delta / distance * RANGE_TARGET_MAX_LINEAR_SPAN_M;
+    Vec3::new(other.x + clamped.x, other.y, other.z + clamped.z)
 }
 
 fn default_motion_for_target(kind: ShootingRangeTargetKind) -> RangeTargetMotionSettings {
@@ -1398,7 +1483,7 @@ pub fn shooting_range_debug_panel(
         .resizable(true)
         .collapsible(true)
         .default_width(430.0)
-        .default_pos(egui::pos2(12.0, 72.0))
+        .default_pos(egui::pos2(500.0, 12.0))
         .show(ctx, |ui| {
             egui::Grid::new("range_auto_aim_debug_grid")
                 .num_columns(2)
@@ -1657,20 +1742,17 @@ fn wrap_angle_rad(angle: f32) -> f32 {
 
 fn truth_gimbal_camera_pose(
     player: &Transform,
-    launch: &Transform,
+    camera_offset_gimbal: Vec3,
     yaw_rad: f32,
     pitch_rad: f32,
 ) -> Transform {
     let gimbal_local = Quat::from_euler(EulerRot::YXZ, yaw_rad, pitch_rad, 0.0);
     let gimbal_world = player.rotation * gimbal_local;
-    let camera_local = launch.translation
-        + launch.rotation.mul_vec3(Vec3::Y)
-            * crate::systems::camera::ROBOT_CAMERA_FORWARD_CLEARANCE;
+    // Mirrors `update_camera_follow` Robot mode: the camera sits on the gimbal
+    // at the configured sensor offset and shares the gimbal orientation.
     Transform {
-        translation: player.translation + gimbal_world * camera_local,
-        rotation: gimbal_world
-            * launch.rotation
-            * Quat::from_euler(EulerRot::ZYX, 0.0, 0.0, std::f32::consts::FRAC_PI_2),
+        translation: player.translation + gimbal_world * camera_offset_gimbal,
+        rotation: gimbal_world * crate::frames::camera_from_gimbal(),
         ..default()
     }
 }
@@ -1689,7 +1771,7 @@ fn optical_axis_error(camera: &Transform, target_world: Vec3) -> Vec2 {
 
 fn solve_truth_gimbal_from_seed(
     player: &Transform,
-    launch: &Transform,
+    camera_offset_gimbal: Vec3,
     target_world: Vec3,
     initial_yaw_rad: f32,
     initial_pitch_rad: f32,
@@ -1698,18 +1780,28 @@ fn solve_truth_gimbal_from_seed(
     let mut pitch = initial_pitch_rad;
 
     for _ in 0..TRUTH_GIMBAL_MAX_SOLVE_STEPS {
-        let camera = truth_gimbal_camera_pose(player, launch, yaw, pitch);
+        let camera = truth_gimbal_camera_pose(player, camera_offset_gimbal, yaw, pitch);
         let error = optical_axis_error(&camera, target_world);
         if error.length() <= TRUTH_GIMBAL_SOLVE_EPSILON_RAD {
             break;
         }
 
         let yaw_error = optical_axis_error(
-            &truth_gimbal_camera_pose(player, launch, yaw + TRUTH_GIMBAL_NUMERIC_STEP_RAD, pitch),
+            &truth_gimbal_camera_pose(
+                player,
+                camera_offset_gimbal,
+                yaw + TRUTH_GIMBAL_NUMERIC_STEP_RAD,
+                pitch,
+            ),
             target_world,
         );
         let pitch_error = optical_axis_error(
-            &truth_gimbal_camera_pose(player, launch, yaw, pitch + TRUTH_GIMBAL_NUMERIC_STEP_RAD),
+            &truth_gimbal_camera_pose(
+                player,
+                camera_offset_gimbal,
+                yaw,
+                pitch + TRUTH_GIMBAL_NUMERIC_STEP_RAD,
+            ),
             target_world,
         );
         let yaw_column = (yaw_error - error) / TRUTH_GIMBAL_NUMERIC_STEP_RAD;
@@ -1743,14 +1835,14 @@ fn solve_truth_gimbal_from_seed(
         );
     }
 
-    let camera = truth_gimbal_camera_pose(player, launch, yaw, pitch);
+    let camera = truth_gimbal_camera_pose(player, camera_offset_gimbal, yaw, pitch);
     let error_rad = optical_axis_error(&camera, target_world).length();
     (yaw, pitch, camera, error_rad)
 }
 
 fn solve_truth_gimbal_command(
     player: &Transform,
-    launch: &Transform,
+    camera_offset_gimbal: Vec3,
     target_world: Vec3,
     initial_yaw_rad: f32,
     initial_pitch_rad: f32,
@@ -1761,11 +1853,21 @@ fn solve_truth_gimbal_command(
         initial_yaw_rad + std::f32::consts::FRAC_PI_2,
         initial_yaw_rad - std::f32::consts::FRAC_PI_2,
     ];
-    let mut best =
-        solve_truth_gimbal_from_seed(player, launch, target_world, seeds[0], initial_pitch_rad);
+    let mut best = solve_truth_gimbal_from_seed(
+        player,
+        camera_offset_gimbal,
+        target_world,
+        seeds[0],
+        initial_pitch_rad,
+    );
     for yaw_seed in seeds.into_iter().skip(1) {
-        let candidate =
-            solve_truth_gimbal_from_seed(player, launch, target_world, yaw_seed, initial_pitch_rad);
+        let candidate = solve_truth_gimbal_from_seed(
+            player,
+            camera_offset_gimbal,
+            target_world,
+            yaw_seed,
+            initial_pitch_rad,
+        );
         if candidate.3 < best.3 {
             best = candidate;
         }
@@ -1777,20 +1879,13 @@ pub fn apply_shooting_range_truth_gimbal(
     exposure_stamp: Res<ExposureWallTimestamp>,
     scene_state: Res<AutoAimSceneState>,
     config: Res<ShootingRangeTruthGimbalConfig>,
+    ballistics: Res<crate::ballistics_config::BallisticsConfig>,
     mut stats: ResMut<ShootingRangeTruthGimbalStats>,
     targets: Query<(&ShootingRangeTarget, &Transform), (Without<Controlled>, Without<MainCamera>)>,
     players: Query<&Transform, (With<Infantry>, With<Controlled>, Without<InfantryGimbal>)>,
     mut gimbals: Query<
         (&mut Transform, &mut InfantryGimbal),
         (With<Controlled>, With<InfantryGimbal>, Without<Infantry>),
-    >,
-    launches: Query<
-        &Transform,
-        (
-            With<Controlled>,
-            With<InfantryLaunchOffset>,
-            Without<InfantryGimbal>,
-        ),
     >,
     mut cameras: Query<&mut Transform, (With<MainCamera>, Without<Controlled>)>,
 ) {
@@ -1807,18 +1902,18 @@ pub fn apply_shooting_range_truth_gimbal(
     else {
         return;
     };
-    let (Ok(player), Ok((mut gimbal_transform, mut gimbal_data)), Ok(launch), Ok(mut camera)) = (
+    let (Ok(player), Ok((mut gimbal_transform, mut gimbal_data)), Ok(mut camera)) = (
         players.single(),
         gimbals.single_mut(),
-        launches.single(),
         cameras.single_mut(),
     ) else {
         return;
     };
 
+    let camera_offset_gimbal = Vec3::from_array(ballistics.camera_offset);
     let (yaw, pitch, camera_pose, error_rad) = solve_truth_gimbal_command(
         player,
-        launch,
+        camera_offset_gimbal,
         target_transform.translation,
         gimbal_data.local_yaw,
         gimbal_data.pitch,
@@ -1911,25 +2006,55 @@ fn advance_range_target_wall_pose(
     (linear_velocity, angular_velocity)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct LinearMotionPath {
+    center: Vec3,
+    axis: Vec3,
+    half_extent: f32,
+}
+
+fn linear_motion_path(settings: &RangeTargetMotionSettings, origin: Vec3) -> LinearMotionPath {
+    if let (Some(a), Some(b)) = (settings.endpoint_a, settings.endpoint_b) {
+        let delta = Vec3::new(b.x - a.x, 0.0, b.z - a.z);
+        let span = delta.length();
+        if span > RANGE_TARGET_BOUNDARY_EPSILON_M {
+            return LinearMotionPath {
+                center: Vec3::new((a.x + b.x) * 0.5, a.y, (a.z + b.z) * 0.5),
+                axis: delta / span,
+                half_extent: (span * 0.5).min(RANGE_TARGET_MAX_LINEAR_SPAN_M * 0.5),
+            };
+        }
+    }
+
+    LinearMotionPath {
+        center: origin,
+        axis: target_linear_axis(settings),
+        half_extent: settings
+            .linear_span_m
+            .clamp(0.0, RANGE_TARGET_MAX_LINEAR_SPAN_M)
+            * 0.5,
+    }
+}
+
 fn advance_bounded_wall_translation(
     wall_pose: &mut RangeTargetWallPose,
     settings: &mut RangeTargetMotionSettings,
     origin: Vec3,
     dt_s: f32,
 ) -> Vec3 {
-    let axis = target_linear_axis(settings);
+    let path = linear_motion_path(settings, origin);
     let speed = settings.linear_speed_mps.max(0.0);
-    let half_extent = settings
-        .linear_span_m
-        .clamp(0.0, RANGE_TARGET_MAX_LINEAR_SPAN_M)
-        * 0.5;
-    if axis == Vec3::ZERO || speed <= 0.0 || half_extent <= RANGE_TARGET_BOUNDARY_EPSILON_M {
+    if path.axis == Vec3::ZERO
+        || speed <= 0.0
+        || path.half_extent <= RANGE_TARGET_BOUNDARY_EPSILON_M
+    {
         return Vec3::ZERO;
     }
 
+    let half_extent = path.half_extent;
     let span = half_extent * 2.0;
-    let offset = (wall_pose.translation - origin)
-        .dot(axis)
+    let offset = (wall_pose.translation - path.center)
+        .dot(path.axis)
         .clamp(-half_extent, half_extent);
     let unfolded = if normalized_travel_sign(settings) > 0.0 {
         offset + half_extent
@@ -1944,8 +2069,8 @@ fn advance_bounded_wall_translation(
     };
     settings.travel_sign = sign;
     let new_offset = distance_from_low - half_extent;
-    wall_pose.translation = origin + axis * new_offset;
-    axis * speed * sign
+    wall_pose.translation = path.center + path.axis * new_offset;
+    path.axis * speed * sign
 }
 
 fn resolve_debug_json_path(
@@ -2238,10 +2363,9 @@ mod tests {
     fn assert_truth_gimbal_centers(target: Vec3) -> (f32, f32) {
         let player = Transform::from_translation(Vec3::new(-5.8, 1.0, -5.4))
             .with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
-        let launch = Transform::from_translation(Vec3::new(0.0, 0.18, 0.04))
-            .with_rotation(Quat::from_rotation_x(-0.48));
+        let camera_offset = crate::frames::DEFAULT_CAMERA_OFFSET_GIMBAL;
         let (yaw, pitch, camera, error_rad) =
-            solve_truth_gimbal_command(&player, &launch, target, 0.0, -0.2);
+            solve_truth_gimbal_command(&player, camera_offset, target, 0.0, -0.2);
         assert!(yaw.is_finite());
         assert!(pitch.is_finite());
         assert!(error_rad < 5e-4, "target={target:?}, error={error_rad}");
@@ -2279,6 +2403,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(ExposureWallTimestamp::default())
             .insert_resource(AutoAimSceneState::new(AutoAimSceneMode::ShootingRange))
+            .insert_resource(crate::ballistics_config::BallisticsConfig::default())
             .insert_resource(config)
             .insert_resource(ShootingRangeTruthGimbalStats::from_config(config))
             .add_systems(Update, apply_shooting_range_truth_gimbal);
@@ -2523,6 +2648,75 @@ mod tests {
 
         approx_eq(transform.translation.x, 4.0);
         approx_eq(velocity.x, -2.0);
+    }
+
+    #[test]
+    fn endpoint_path_uses_a_to_b_axis_and_span() {
+        let mut settings = RangeTargetMotionSettings {
+            mode: RangeTargetMotionMode::Linear,
+            linear_speed_mps: 1.0,
+            endpoint_a: Some(Vec3::new(-2.0, 1.0, 0.0)),
+            endpoint_b: Some(Vec3::new(2.0, 1.0, 0.0)),
+            travel_sign: 1.0,
+            ..default()
+        };
+        let mut pose = RangeTargetWallPose {
+            translation: Vec3::new(-2.0, 1.0, 0.0),
+            rotation: Quat::IDENTITY,
+            last_real_elapsed_s: 0.0,
+        };
+
+        let velocity = advance_bounded_wall_translation(&mut pose, &mut settings, Vec3::ZERO, 1.0);
+
+        approx_eq(pose.translation.x, -1.0);
+        approx_eq(pose.translation.y, 1.0);
+        approx_eq(velocity.x, 1.0);
+        approx_eq(velocity.z, 0.0);
+    }
+
+    #[test]
+    fn endpoint_selection_clamps_span_to_eight_meters() {
+        let mut state = ShootingRangeControlState::default();
+        state.set_endpoint(
+            ShootingRangeTargetKind::Armor3,
+            RangeEndpoint::A,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        state.set_endpoint(
+            ShootingRangeTargetKind::Armor3,
+            RangeEndpoint::B,
+            Vec3::new(20.0, 2.0, 0.0),
+        );
+
+        let settings = state.settings(ShootingRangeTargetKind::Armor3);
+        let a = settings.endpoint_a.expect("endpoint A");
+        let b = settings.endpoint_b.expect("endpoint B");
+        approx_eq(a.x, 0.0);
+        approx_eq(a.y, 1.0);
+        approx_eq(b.x, RANGE_TARGET_MAX_LINEAR_SPAN_M);
+        approx_eq(b.y, 1.0);
+    }
+
+    #[test]
+    fn clearing_endpoints_restores_direction_span_motion() {
+        let mut state = ShootingRangeControlState::default();
+        state.armor_3.direction_deg = 0.0;
+        state.armor_3.linear_span_m = 4.0;
+        state.set_endpoint(
+            ShootingRangeTargetKind::Armor3,
+            RangeEndpoint::A,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        state.set_endpoint(
+            ShootingRangeTargetKind::Armor3,
+            RangeEndpoint::B,
+            Vec3::new(2.0, 1.0, 0.0),
+        );
+        state.clear_endpoints(ShootingRangeTargetKind::Armor3);
+
+        let path = linear_motion_path(&state.armor_3, Vec3::ZERO);
+        approx_eq(path.half_extent, 2.0);
+        approx_eq(path.axis.z, 1.0);
     }
 
     #[test]

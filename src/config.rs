@@ -187,12 +187,9 @@ impl Default for MecanumConfig {
 #[derive(Deserialize, Reflect, Clone)]
 pub struct ProjectileConfig {
     pub lifetime: f32,
-    pub speed: f32,
     pub cooldown: f32,
-    pub diameter: f32,
     pub uav_size: f32,
     pub uav_vel: f32,
-    pub mass: f32,
     pub friction: f32,
     pub linear_damping: f32,
     #[serde(default)]
@@ -613,10 +610,7 @@ impl Default for SimulationConfig {
                 mecanum: MecanumConfig::default(),
                 projectile: ProjectileConfig {
                     lifetime: 5.0,
-                    speed: 25.0,
                     cooldown: 0.1,
-                    diameter: 0.017,
-                    mass: 0.017,
                     friction: 1.1,
                     linear_damping: 0.0,
                     aerodynamics: ProjectileAerodynamicsConfig::default(),

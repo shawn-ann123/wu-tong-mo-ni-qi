@@ -92,6 +92,7 @@ pub fn configure_integrated_auto_aim_environment(config: &SimulationConfig) {
 
 fn manage_integrated_auto_aim_bridge(
     config: Res<SimulationConfig>,
+    ballistics: Res<crate::ballistics_config::BallisticsConfig>,
     mut bridge: ResMut<IntegratedAutoAimBridge>,
 ) {
     if !config.auto_aim.managed_bridge_enabled {
@@ -131,7 +132,7 @@ fn manage_integrated_auto_aim_bridge(
     bridge.last_spawn_attempt = Some(now);
     bridge.status = IntegratedAutoAimBridgeStatus::Starting;
 
-    match spawn_bridge(&config) {
+    match spawn_bridge(&config, &ballistics) {
         Ok(process) => {
             info!("integrated auto-aim bridge started; F5 gates aiming inside the simulator");
             bridge.process = Some(process);
@@ -152,10 +153,13 @@ fn stop_bridge(process: &mut Option<ManagedBridgeProcess>) {
     }
 }
 
-fn spawn_bridge(config: &SimulationConfig) -> Result<ManagedBridgeProcess, String> {
+fn spawn_bridge(
+    config: &SimulationConfig,
+    ballistics: &crate::ballistics_config::BallisticsConfig,
+) -> Result<ManagedBridgeProcess, String> {
     #[cfg(not(target_os = "windows"))]
     {
-        let _ = config;
+        let _ = (config, ballistics);
         return Err("integrated WSL bridge launch is only supported on Windows".to_string());
     }
 
@@ -219,7 +223,7 @@ fn spawn_bridge(config: &SimulationConfig) -> Result<ManagedBridgeProcess, Strin
         } else {
             "OFF"
         };
-        let bullet_speed = config.projectile.speed.to_string();
+        let bullet_speed = ballistics.muzzle_speed_mps.to_string();
         let dual_focal = std::env::var("AIM_SIM_DUAL_FOCAL").unwrap_or_default();
         let wide_focal_mm = std::env::var("AIM_SIM_WIDE_FOCAL_MM").unwrap_or_default();
         let precision_focal_mm = std::env::var("AIM_SIM_PRECISION_FOCAL_MM").unwrap_or_default();

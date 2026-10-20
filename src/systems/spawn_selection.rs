@@ -11,6 +11,16 @@ use super::DebugWindowState;
 const TOP_DOWN_CAMERA_HEIGHT: f32 = 30.0;
 const DEFAULT_SPAWN_Y: f32 = 0.5;
 
+pub(crate) fn top_down_world_xz(cursor: Vec2, window_size: Vec2) -> Vec2 {
+    let ndc_x = (cursor.x / window_size.x) * 2.0 - 1.0;
+    let ndc_y = 1.0 - (cursor.y / window_size.y) * 2.0;
+    let fov_rad = 45.0_f32.to_radians();
+    let aspect = window_size.x / window_size.y;
+    let half_h = TOP_DOWN_CAMERA_HEIGHT * (fov_rad / 2.0).tan();
+    let half_w = half_h * aspect;
+    Vec2::new(ndc_x * half_w, -ndc_y * half_h)
+}
+
 #[derive(Resource, Default)]
 pub struct SpawnSelectionState {
     pub active: bool,
@@ -84,22 +94,13 @@ pub fn spawn_click_detection(
             && event.window == primary_window
         {
             info!("Spawn click detected on primary window!");
-            if let Some(cursor_pos) = state.last_cursor_pos {                let Ok(window) = windows.single() else {
+            if let Some(cursor_pos) = state.last_cursor_pos {
+                let Ok(window) = windows.single() else {
                     return;
                 };
-                let window_size = window.size();
-                let ndc_x = (cursor_pos.x / window_size.x) * 2.0 - 1.0;
-                let ndc_y = 1.0 - (cursor_pos.y / window_size.y) * 2.0;
+                let world = top_down_world_xz(cursor_pos, window.size());
 
-                let fov_rad = 45.0_f32.to_radians();
-                let aspect = window_size.x / window_size.y;
-                let half_h = TOP_DOWN_CAMERA_HEIGHT * (fov_rad / 2.0).tan();
-                let half_w = half_h * aspect;
-
-                let world_x = ndc_x * half_w;
-                let world_z = -ndc_y * half_h;
-
-                state.click_to_apply = Some(Vec3::new(world_x, DEFAULT_SPAWN_Y, world_z));
+                state.click_to_apply = Some(Vec3::new(world.x, DEFAULT_SPAWN_Y, world.y));
             }
         }
     }
@@ -212,4 +213,26 @@ pub fn top_down_camera_system(
 
     camera_transform.translation = Vec3::new(0.0, TOP_DOWN_CAMERA_HEIGHT, 0.0);
     camera_transform.rotation = Quat::from_euler(EulerRot::XZY, -std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::top_down_world_xz;
+    use bevy::prelude::Vec2;
+
+    #[test]
+    fn top_down_mapping_centers_and_keeps_map_orientation() {
+        let window = Vec2::new(1000.0, 500.0);
+
+        let center = top_down_world_xz(window * 0.5, window);
+        assert!(center.abs_diff_eq(Vec2::ZERO, 1e-5));
+
+        let top_left = top_down_world_xz(Vec2::ZERO, window);
+        assert!(top_left.x < 0.0);
+        assert!(top_left.y < 0.0);
+
+        let bottom_right = top_down_world_xz(window, window);
+        assert!(bottom_right.x > 0.0);
+        assert!(bottom_right.y > 0.0);
+    }
 }

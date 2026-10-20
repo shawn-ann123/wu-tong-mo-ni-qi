@@ -38,7 +38,7 @@ pub fn setup_debug_window(
         .spawn((
             Window {
                 title: "Daedalus Debug Panels".to_string(),
-                resolution: WindowResolution::new(480, 720),
+                resolution: WindowResolution::new(960, 720),
                 position: WindowPosition::Automatic,
                 ..default()
             },

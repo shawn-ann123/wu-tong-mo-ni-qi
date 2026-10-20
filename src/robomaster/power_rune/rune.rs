@@ -32,6 +32,16 @@ pub struct ManualPowerRuneControlState {
 #[derive(Resource, Debug, Default, Copy, Clone, PartialEq, Eq)]
 struct InitialPowerRuneControlApplied(bool);
 
+impl ManualPowerRuneControlState {
+    pub fn override_enabled(&self) -> bool {
+        self.override_enabled
+    }
+
+    pub fn active_mode(&self) -> Option<RuneMode> {
+        self.active_mode
+    }
+}
+
 impl PowerRune {
     pub fn new(team: Team, mode: RuneMode) -> Self {
         Self { team, mode }
@@ -138,7 +148,7 @@ fn initial_power_rune_state(mode: RuneMode, rng: &mut impl rand::Rng) -> Mechani
     forced_power_rune_state_from_env(mode).unwrap_or_else(|| MechanismState::start(mode, rng))
 }
 
-fn apply_power_rune_control(
+pub(crate) fn apply_power_rune_control(
     active_mode: Option<RuneMode>,
     control: &mut ManualPowerRuneControlState,
     runes: &mut Query<(&mut PowerRune, &mut PowerRuneMechanism)>,
