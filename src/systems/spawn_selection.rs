@@ -1,12 +1,12 @@
+use bevy::input::ButtonState;
+use bevy::input::mouse::MouseButtonInput;
 use bevy::prelude::*;
 use bevy::window::{CursorMoved, PrimaryWindow};
-use bevy::input::mouse::MouseButtonInput;
-use bevy::input::ButtonState;
 use bevy_inspector_egui::bevy_egui::EguiContexts;
 use bevy_inspector_egui::egui;
 
-use crate::components::{CameraMode, Controlled, FollowingType, Infantry};
 use super::DebugWindowState;
+use crate::components::{CameraMode, Controlled, FollowingType, Infantry};
 
 const TOP_DOWN_CAMERA_HEIGHT: f32 = 30.0;
 const DEFAULT_SPAWN_Y: f32 = 0.5;
@@ -179,7 +179,10 @@ pub fn spawn_selection_ui(
 
             if let Some(pos) = state.pending_spawn {
                 ui.separator();
-                ui.label(format!("Current: ({:.2}, {:.2}, {:.2})", pos.x, pos.y, pos.z));
+                ui.label(format!(
+                    "Current: ({:.2}, {:.2}, {:.2})",
+                    pos.x, pos.y, pos.z
+                ));
             }
         });
 }
@@ -201,7 +204,10 @@ pub fn apply_spawn_position(
 
 pub fn top_down_camera_system(
     mode: Res<CameraMode>,
-    mut camera_query: Query<&mut Transform, (With<crate::components::MainCamera>, Without<Infantry>)>,
+    mut camera_query: Query<
+        &mut Transform,
+        (With<crate::components::MainCamera>, Without<Infantry>),
+    >,
 ) {
     if mode.0 != FollowingType::TopDown {
         return;
@@ -212,7 +218,8 @@ pub fn top_down_camera_system(
     };
 
     camera_transform.translation = Vec3::new(0.0, TOP_DOWN_CAMERA_HEIGHT, 0.0);
-    camera_transform.rotation = Quat::from_euler(EulerRot::XZY, -std::f32::consts::FRAC_PI_2, 0.0, 0.0);
+    camera_transform.rotation =
+        Quat::from_euler(EulerRot::XZY, -std::f32::consts::FRAC_PI_2, 0.0, 0.0);
 }
 
 #[cfg(test)]

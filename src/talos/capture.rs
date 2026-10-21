@@ -441,11 +441,16 @@ pub fn publish_talos_pose_system(
         );
         publisher.publish_runtime_state(RuntimeState {
             timestamp_ns: frame_stamp.timestamp_ns,
+            frame_seq: frame_stamp.frame_seq,
+            last_applied_command_id: 0,
             following: u8::from(following.load(Ordering::Acquire)),
             _pad1: [0; 3],
             gimbal_yaw_rad: gimbal_data.local_yaw,
             gimbal_pitch_rad: gimbal_data.pitch,
-            _pad: [0; 44],
+            gimbal_yaw_velocity_rad_s: 0.0,
+            gimbal_pitch_velocity_rad_s: 0.0,
+            status_flags: 0,
+            _pad: [0; 16],
         });
     }
 }

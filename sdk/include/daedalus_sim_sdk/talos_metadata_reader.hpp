@@ -30,15 +30,15 @@ struct GroundTruthExposureSnapshot {
   std::uint64_t publication = 0;
 };
 
-// Public command-space gimbal feedback. yaw_deg uses the same zero as
-// UdpGimbalCommand::yaw_deg. pitch_deg is 90 degrees at level aim, matching
-// UdpGimbalCommand::pitch_deg.
+// Public command-space gimbal feedback. yaw_deg and pitch_deg use the same
+// zero and signs as UdpGimbalCommand. Level aim is pitch_deg == 0, positive
+// pitch raises the optical axis, and negative pitch lowers it.
 struct GimbalState {
   std::uint64_t frame_seq = 0;
   std::uint64_t timestamp_ns = 0;
   std::uint64_t last_applied_command_id = 0;
   float yaw_deg = 0.0F;
-  float pitch_deg = 90.0F;
+  float pitch_deg = 0.0F;
   float yaw_velocity_deg_s = 0.0F;
   float pitch_velocity_deg_s = 0.0F;
   std::uint32_t status_flags = 0;

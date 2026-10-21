@@ -70,7 +70,11 @@ pub fn projectile_launch(
 
     // Muzzle velocity follows the gimbal frame +X (forward). In the Bevy-aligned
     // gimbal node frame that is -Z, exposed as GIMBAL_FORWARD.
-    let direction = gimbal.0.rotation().mul_vec3(GIMBAL_FORWARD).normalize_or_zero();
+    let direction = gimbal
+        .0
+        .rotation()
+        .mul_vec3(GIMBAL_FORWARD)
+        .normalize_or_zero();
     if direction == Vec3::ZERO {
         return;
     }
@@ -263,7 +267,10 @@ mod tests {
                 Handle::<Mesh>::default(),
                 Handle::<StandardMaterial>::default(),
             ))
-            .insert_resource(ProjectileCooldown(Timer::from_seconds(0.0, TimerMode::Once)))
+            .insert_resource(ProjectileCooldown(Timer::from_seconds(
+                0.0,
+                TimerMode::Once,
+            )))
             .init_resource::<Time>()
             .add_systems(Update, projectile_launch);
 
@@ -286,10 +293,9 @@ mod tests {
         ));
         app.update();
 
-        let mut query = app.world_mut().query_filtered::<
-            (&Transform, &LinearVelocity),
-            With<Projectile>,
-        >();
+        let mut query = app
+            .world_mut()
+            .query_filtered::<(&Transform, &LinearVelocity), With<Projectile>>();
         let projectiles: Vec<_> = query
             .iter(app.world())
             .map(|(transform, velocity)| (transform.translation, velocity.0))
@@ -306,9 +312,7 @@ mod tests {
             actual_direction.distance(expected_direction) < 1e-5,
             "direction={actual_direction:?} expected={expected_direction:?}"
         );
-        assert!(
-            (velocity.length() - BallisticsConfig::default().muzzle_speed_mps).abs() < 1e-4
-        );
+        assert!((velocity.length() - BallisticsConfig::default().muzzle_speed_mps).abs() < 1e-4);
     }
 
     #[test]

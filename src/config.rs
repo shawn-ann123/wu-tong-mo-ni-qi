@@ -324,26 +324,16 @@ impl Default for NetworkBridgeConfig {
 #[serde(default)]
 pub struct AutoAimConfig {
     pub enabled_on_start: bool,
-    pub managed_bridge_enabled: bool,
     pub command_transport: String,
     pub bridge_mode: String,
-    pub wsl_distro: String,
-    pub workspace_dir: String,
-    pub talos_ipc_dir: String,
-    pub bridge_workdir: String,
 }
 
 impl Default for AutoAimConfig {
     fn default() -> Self {
         Self {
             enabled_on_start: false,
-            managed_bridge_enabled: false,
             command_transport: "udp".to_string(),
             bridge_mode: "armor".to_string(),
-            wsl_distro: "Ubuntu-OSTEP".to_string(),
-            workspace_dir: "../..".to_string(),
-            talos_ipc_dir: "talos-ipc".to_string(),
-            bridge_workdir: "aim_sim_bridge".to_string(),
         }
     }
 }

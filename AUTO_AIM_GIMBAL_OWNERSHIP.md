@@ -12,10 +12,10 @@ and a pitch-limit value.
 
 Transport pitch contracts:
 
-- vivsionn `AimCommand.pitch_deg`: optical/tracker elevation in degrees;
-- the camera mount is 25 degrees from the local gimbal joint;
-- UDP `pitch_deg`: optical-neutral form, `65 deg - optical_pitch`;
-- Talos shared-memory command: the existing Talos sign/neutral conversion;
+- every command transport uses the same absolute gimbal elevation in degrees;
+- `pitch_deg == 0` is level aim, positive raises the optical axis, and negative lowers it;
+- UDP, ROS2 and Talos shared-memory commands apply the configured symmetric
+  pitch limit without any transport-specific offset or sign conversion;
 - exactly one Daedalus transport applies commands, selected by
   `config.auto_aim.command_transport`.
 

@@ -15,7 +15,7 @@ use crate::robomaster::prelude::{
 use crate::setup::{AutoAimSceneMode, AutoAimSceneState, ShootingRangeTarget};
 use crate::systems::{RangeTargetMotionMode, ShootingRangeControlState};
 
-const PROTOCOL: &str = "daedalus.scene-control/1";
+const PROTOCOL: &str = "daedalus.scene-control/2";
 const DEFAULT_BIND: &str = "127.0.0.1:5603";
 const MAX_COMMANDS_PER_FRAME: usize = 64;
 
@@ -680,7 +680,7 @@ mod tests {
     #[test]
     fn parses_valid_ping_request() {
         let request = parse_request(
-            br#"{"protocol":"daedalus.scene-control/1","command_id":7,"session_id":"s","op":"ping","args":{}}"#,
+            br#"{"protocol":"daedalus.scene-control/2","command_id":7,"session_id":"s","op":"ping","args":{}}"#,
         )
         .unwrap();
         assert_eq!(request.command_id, 7);

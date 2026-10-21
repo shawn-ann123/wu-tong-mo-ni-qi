@@ -5,7 +5,7 @@
 
 namespace daedalus::sim::sdk::v1 {
 
-inline constexpr const char *kSdkVersion = "1.3.1";
+inline constexpr const char *kSdkVersion = "2.0.0";
 inline constexpr std::uint32_t kShmMagic = 0x54414C05;
 inline constexpr std::uint32_t kShmVersion = 7;
 inline constexpr std::uint32_t kSdkAbiRevision = 2;
@@ -47,6 +47,7 @@ static_assert(sizeof(PoseMeta) == 64);
 struct alignas(32) GimbalCmd {
   std::uint64_t timestamp_ns;
   float yaw_deg;
+  // Zero is level; positive raises and negative lowers the optical axis.
   float pitch_deg;
   float distance_m;
   std::uint8_t fire_advice;

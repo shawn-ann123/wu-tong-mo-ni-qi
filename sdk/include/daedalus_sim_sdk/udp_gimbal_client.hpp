@@ -13,6 +13,7 @@ struct UdpGimbalCommand {
   // Zero asks UdpGimbalClient::send to allocate a process-local monotonic id.
   std::uint64_t command_id = 0;
   std::optional<float> yaw_deg;
+  // Absolute gimbal elevation: 0 is level, positive is up, negative is down.
   std::optional<float> pitch_deg;
   std::optional<float> distance_m;
   bool fire_advice = false;

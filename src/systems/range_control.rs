@@ -14,7 +14,6 @@ use crate::capture::ExposureWallTimestamp;
 use crate::components::{
     ActiveSlapper, Controlled, Infantry, InfantryGimbal, MainCamera, SubscribeAutoAim,
 };
-use crate::integrated_auto_aim::IntegratedAutoAimBridge;
 use crate::setup::{
     AutoAimSceneMode, AutoAimSceneState, ShootingRangeTarget, ShootingRangeTargetKind,
 };
@@ -215,7 +214,10 @@ impl ShootingRangeControlState {
         }
     }
 
-    pub fn settings_mut(&mut self, kind: ShootingRangeTargetKind) -> &mut RangeTargetMotionSettings {
+    pub fn settings_mut(
+        &mut self,
+        kind: ShootingRangeTargetKind,
+    ) -> &mut RangeTargetMotionSettings {
         match kind {
             ShootingRangeTargetKind::Armor3 => &mut self.armor_3,
             ShootingRangeTargetKind::Armor1 => &mut self.armor_1,
@@ -1452,7 +1454,6 @@ pub fn shooting_range_debug_panel(
     mut contexts: EguiContexts,
     time: Res<Time>,
     auto_aim: Res<SubscribeAutoAim>,
-    bridge_status: Option<Res<IntegratedAutoAimBridge>>,
     stats: Res<ProjectileStatistics>,
     targets: Query<(), With<ShootingRangeTarget>>,
     mut state: ResMut<ShootingRangeDebugPanelState>,
@@ -1473,10 +1474,7 @@ pub fn shooting_range_debug_panel(
 
     let bridge = state.bridge.as_ref();
     let pipeline = state.pipeline.as_ref();
-    let bridge_status = bridge_status
-        .as_deref()
-        .map(IntegratedAutoAimBridge::status_label)
-        .unwrap_or("N/A");
+    let bridge_status = if bridge.is_some() { "telemetry" } else { "N/A" };
     let auto_aim_on = auto_aim.load(std::sync::atomic::Ordering::Acquire);
 
     egui::Window::new("Auto-Aim Debug")
@@ -1902,11 +1900,9 @@ pub fn apply_shooting_range_truth_gimbal(
     else {
         return;
     };
-    let (Ok(player), Ok((mut gimbal_transform, mut gimbal_data)), Ok(mut camera)) = (
-        players.single(),
-        gimbals.single_mut(),
-        cameras.single_mut(),
-    ) else {
+    let (Ok(player), Ok((mut gimbal_transform, mut gimbal_data)), Ok(mut camera)) =
+        (players.single(), gimbals.single_mut(), cameras.single_mut())
+    else {
         return;
     };
 
@@ -2722,27 +2718,27 @@ mod tests {
     #[test]
     fn debug_json_path_prefers_explicit_path() {
         let path = resolve_debug_json_path(
-            Some(OsString::from(r"D:\debug\aim_pipeline.json")),
-            Some(OsString::from(r"D:\workspace")),
+            Some(OsString::from("/tmp/daedalus/aim_pipeline.json")),
+            Some(OsString::from("/opt/daedalus-workspace")),
             None,
             "aim_pipeline.json",
         );
 
-        assert_eq!(path, PathBuf::from(r"D:\debug\aim_pipeline.json"));
+        assert_eq!(path, PathBuf::from("/tmp/daedalus/aim_pipeline.json"));
     }
 
     #[test]
     fn debug_json_path_uses_workspace_default() {
         let path = resolve_debug_json_path(
             None,
-            Some(OsString::from(r"D:\workspace")),
+            Some(OsString::from("/opt/daedalus-workspace")),
             None,
             "aim_bridge.json",
         );
 
         assert_eq!(
             path,
-            PathBuf::from(r"D:\workspace")
+            PathBuf::from("/opt/daedalus-workspace")
                 .join("aim_sim_bridge")
                 .join("build")
                 .join("debug")

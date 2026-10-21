@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use bevy::render::settings::{
-    Backends, InstanceFlags, PowerPreference, RenderCreation, WgpuSettings, WgpuSettingsPriority,
-};
 use bevy::render::RenderPlugin;
+use bevy::render::settings::{
+    Backends, InstanceFlags, PowerPreference, RenderCreation, WgpuSettings,
+};
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,9 +87,8 @@ fn classify_adapter(info: &wgpu::AdapterInfo) -> GpuTier {
         || name_lower.contains("uhd")
         || name_lower.contains("hd graphics");
 
-    let is_amd = name_lower.contains("amd")
-        || name_lower.contains("radeon")
-        || name_lower.contains("rx ");
+    let is_amd =
+        name_lower.contains("amd") || name_lower.contains("radeon") || name_lower.contains("rx ");
 
     let is_discrete = info.device_type == wgpu::DeviceType::DiscreteGpu;
     let is_integrated = info.device_type == wgpu::DeviceType::IntegratedGpu;
@@ -123,12 +122,12 @@ fn classify_adapter(info: &wgpu::AdapterInfo) -> GpuTier {
 
 fn enumerate_candidates() -> Vec<AdapterCandidate> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends: Backends::VULKAN | Backends::DX12 | Backends::METAL,
+        backends: Backends::VULKAN,
         flags: InstanceFlags::default() | InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER,
         ..wgpu::InstanceDescriptor::new_without_display_handle()
     });
 
-    let adapters = futures::executor::block_on(instance.enumerate_adapters(Backends::all()));
+    let adapters = futures::executor::block_on(instance.enumerate_adapters(Backends::VULKAN));
 
     let mut candidates = Vec::new();
 
@@ -186,32 +185,16 @@ pub fn detect_best_adapter() -> Option<AdapterCandidate> {
     Some(best)
 }
 
-fn is_wsl() -> bool {
-    std::env::var_os("WSL_DISTRO_NAME").is_some()
-        || std::env::var_os("WSL_INTEROP").is_some()
-        || std::fs::read_to_string("/proc/sys/kernel/osrelease")
-            .map(|release| release.to_ascii_lowercase().contains("microsoft"))
-            .unwrap_or(false)
-}
-
 pub struct GpuSelectionResult {
     pub render_plugin: RenderPlugin,
     pub adapter_info: Option<GpuAdapterInfo>,
 }
 
 pub fn render_plugin_with_gpu_selection() -> GpuSelectionResult {
-    let wsl = cfg!(target_os = "linux") && is_wsl();
-
     let mut settings = WgpuSettings {
         power_preference: PowerPreference::HighPerformance,
         ..Default::default()
     };
-
-    if wsl {
-        settings.instance_flags =
-            InstanceFlags::default() | InstanceFlags::ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER;
-        settings.priority = WgpuSettingsPriority::Functionality;
-    }
 
     let adapter_info = if let Some(best) = detect_best_adapter() {
         let _ = SELECTED_ADAPTER.set(best.clone());

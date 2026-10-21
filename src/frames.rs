@@ -32,9 +32,10 @@ pub const GIMBAL_LEFT: Vec3 = Vec3::NEG_X;
 /// Up direction in the gimbal node frame (Bevy +Y).
 pub const GIMBAL_UP: Vec3 = Vec3::Y;
 
-/// Rotation mapping vectors from the camera optical frame to the gimbal frame.
+/// Rotation mapping vectors from the camera optical frame to the Bevy gimbal node.
 ///
-/// Gimbal frame: +X forward, +Y left, +Z up.
+/// Logical gimbal frame: +X forward, +Y left, +Z up.
+/// Bevy gimbal node: +X right, +Y up, +Z backward.
 /// Camera optical frame: +X right, +Y down, +Z forward.
 ///
 /// Expressed in gimbal-node axes the columns are
@@ -43,9 +44,9 @@ pub const GIMBAL_UP: Vec3 = Vec3::Y;
 /// maps to `-GIMBAL_UP`, and optical right (+X_c) maps to `-GIMBAL_LEFT`.
 pub fn gimbal_from_camera_optical() -> Quat {
     Quat::from_mat3(&Mat3::from_cols(
-        -GIMBAL_LEFT,    // camera +X (right)
-        -GIMBAL_UP,      // camera +Y (down)
-        GIMBAL_FORWARD,  // camera +Z (forward)
+        -GIMBAL_LEFT,   // camera +X (right)
+        -GIMBAL_UP,     // camera +Y (down)
+        GIMBAL_FORWARD, // camera +Z (forward)
     ))
 }
 

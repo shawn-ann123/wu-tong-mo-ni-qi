@@ -1,222 +1,37 @@
-<div align="center">
+# Daedalus 模拟器
 
-# 🧪 Daedalus
+RoboMaster 视觉算法验证模拟器。本仓库维护 Linux 原生渲染、物理、场景、采集、真值、控制、SDK 和发布链路。
 
-**RoboMaster 视觉算法验证模拟器**
+本项目基于 [Blackjack200/bevy_robomaster_simulator](https://github.com/Blackjack200/bevy_robomaster_simulator) 发展，原始作者、许可证和派生声明见 [NOTICE.md](NOTICE.md)。
 
-*为算法而生的实验场，让自瞄在上场前就经历真实考验*
+## 当前契约
 
-[![Rust](https://img.shields.io/badge/Rust-Stable-orange.svg?style=for-the-badge&logo=rust)](https://www.rust-lang.org/)
-[![Bevy](https://img.shields.io/badge/Bevy-Engine-3A3A3A.svg?style=for-the-badge&logo=bevy)](https://bevyengine.org/)
-[![ROS2](https://img.shields.io/badge/ROS2-Integrated-22314E.svg?style=for-the-badge&logo=ros)](https://www.ros.org/)
+- 模拟器与 SDK：`2.0.0`
+- 图像：RGB24/RGBA32 `1440×1080`
+- 物理：250 Hz；高性能采集上限 200 Hz；物理发射上限 20 Hz
+- pitch：`0°` 水平，正值抬头，负值低头，默认约 `[-45°,+45°]`
+- 平台：Linux；Windows/PowerShell/WSL 集成启动链路已退役
 
-</div>
+坐标系、接口和角度语义见 [SIMULATOR_INTERFACE.md](agent-team/SIMULATOR_INTERFACE.md)。
 
-## 来源与维护声明
+## 启动
 
-本仓库是由 **3SE 战队**持续维护、适配和改进的 Daedalus 模拟器版本，基于 [Blackjack200/bevy_robomaster_simulator](https://github.com/Blackjack200/bevy_robomaster_simulator) 的公开开源工作发展而来。3SE 的工作包括将模拟器整理为独立发布仓库、维护公共 SDK 与版本契约、完善场景控制、性能与发布流程，以及针对自身研发需求的持续工程改进。
-
-原始工作、作者署名和开源许可证均应被保留；本仓库不将上游工作表述为 3SE 的独立原创。关于衍生版本的完整归属说明见 [NOTICE.md](NOTICE.md)，具体改动可通过 Git 历史和 Release 记录追溯。
-
-## 正式仓库与发布
-
-本仓库是模拟器、公共 SDK 和正式 Release 的唯一源码所有者。自瞄与打符不再复制模拟器源码，只消费带版本的 `DaedalusSimSdk` 和发布包。
-
-- 固定基线：RGB24 `1440×1080`、物理 `250 Hz`、高性能采集上限 `200 Hz`、模拟器物理发射上限 `20 Hz`；
-- 默认高性能模式：DX12 离屏图像持续渲染，不创建主窗口、不拉起前端 debug 子进程，并由模拟器保持后台事件循环；加 `-Visible` 进入 Vulkan 可视验收模式；
-- 正式构建、打包、标签规则见 [RELEASE.md](RELEASE.md)；
-- 完整客户端 SDK 见 [sdk/README.md](sdk/README.md)；
-- 性能实测与两种模式见 [SIMULATOR_PERFORMANCE.md](SIMULATOR_PERFORMANCE.md)。
-- 常见启动、渲染、端口、WSL、场景控制与消费者故障见 [SIMULATOR_TROUBLESHOOTING.md](SIMULATOR_TROUBLESHOOTING.md)。
-
-```powershell
-Set-Location D:\仿真\repos\daedalus-simulator
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
+```bash
+./start-simulator.sh
+./start-simulator.sh --target-only
+./start-simulator.sh --visible
 ```
 
-## 🚀 功能亮点
-
-* 🎯 **全要素战场环境仿真**
-  覆盖能量机关、前哨站、大/小装甲模块等 RoboMaster 核心视觉目标，提供高保真的外观与状态模拟。
-
-* 🤖 **多机器人模型与行为**
-  支持步兵（Infantry）与英雄（Hero）机器人的移动、底盘旋转、云台控制与弹丸发射。
-
-* 🔄 **算法-数据-控制完整闭环**
-  原生打通 **图像采集 → 目标标注 → ROS2/Talos 推理 → 云台反馈**，实现“看-算-打”全流程验证。
-
-* 📊 **仿真数据集一键生成**
-  支持**所有大/小装甲模块仿真数据集**导出，为检测算法训练、验证与对拍提供高质量数据。
-
-* ⚔️ **多主体动态对抗模拟**
-  己方与多个假人独立控制，支持 Tab 键实时切换，真实构造遮挡、对抗与复杂战场场景。
-
-* 🚀 **双通道实时通信接口**
-    - **ROS2 原生集成**：直接发布图像、TF 与位姿话题，零成本接入现有自瞄系统
-    - **Talos 零拷贝 IPC**：与 [talos](https://github.com/Blackjack200/talos) 通过共享内存通信，支持实时姿势发布与云台命令订阅
-
-* ⚡️ **高性能实时渲染管线**
-  基于 Bevy 引擎，支持 CPU/GPU 渲染，保证高帧率与严格的时间一致性。
-
----
-
-## 🎨 功能覆盖与开发路线
-
-### ✅ 已实现
-
-#### 🏟️ 战场环境仿真
-
-* **能量机关完整仿真** - 大/小能量机关的激活流程与视觉状态模拟
-* **前哨站完整仿真** - 前哨站外观与装甲模块状态模拟
-* **装甲模块建模与渲染** - 大、小装甲模块全部图案双色灯条显示
-
-#### 🤖 机器人模型与行为
-
-* **步兵机器人（Infantry）** - 移动、底盘旋转、云台控制、17mm弹丸发射
-* **英雄机器人（Hero）** - 大装甲模块专属配置、移动与发射行为
-* **物理动力学模拟** - 基于物理的移动、旋转与碰撞响应
-
-#### 🔌 通信接口集成
-
-* **ROS2 原生集成** - 发布 `/image_raw`、`/camera_info`、`/tf` 等话题，订阅 `/armor_solver/cmd_gimbal`
-* **Talos 共享内存 IPC** - 与 C++ talos-cpp 零拷贝通信，发布 odom/gimbal/muzzle/camera 姿势，订阅云台控制命令
-
-#### 📊 数据生成与工具
-
-* **仿真数据集导出** - 支持**所有大/小装甲模块仿真数据集**一键导出，用于训练与算法验证
-* **控制指令订阅** - 支持 ROS2 与 Talos 双通道控制指令接入
-* **假人控制切换** - Tab 键实时切换活动假人，支持多机器人测试场景
-
-#### ⚡️ 渲染与性能
-
-* **高性能实时渲染管线** - 基于 Bevy 引擎，CPU/GPU 渲染支持，保证高帧率与时间一致性
-* **多视角观测系统** - 自由视角、第一人称、第三人称视角切换（F3键）
-
----
-
-### 🔄 近期计划
-
-* **能量机关仿真数据集导出**
-* **ROS2 自定义相机外参支持**
-
----
-
-### 🚀 规划中功能
-
-* **多机器人协同仿真**（步兵 / 英雄 / 哨兵）
-* **弹道模拟与落点校准验证**
-* **相机成像参数模拟**（曝光、白平衡、畸变）
-* **多光照条件与环境变化模拟**
-
----
-
-## 💡 使用说明
-
-### ROS2 接口
-
-**发布话题**
-
-* `/camera_info`
-* `/image_raw` / `image_compressed`
-* `/tf`
-* `/gimbal_pose`
-* `/odom_pose`
-* `/camera_pose`
-
-**订阅话题**
-
-* `/armor_solver/cmd_gimbal`
-
-### Talos 共享内存接口
-
-**发布姿势**（零拷贝共享内存）
-
-* `odom` - 底盘里程计姿势
-* `gimbal` - 云台旋转姿势
-* `muzzle` - 枪口偏移姿势
-* `camera` - 相机外参姿势
-
-**订阅命令**
-
-* `gimbal_cmd` - 云台控制命令（含开火建议）
-
----
-
-### 控制方式
-
-#### 己方 Infantry
-
-| 功能   | 按键              |
-|------|-----------------|
-| 移动   | `W` `A` `S` `D` |
-| 底盘旋转 | `Q` `E`         |
-| 发射弹丸 | `Space`         |
-| 云台旋转 | `↑` `↓` `←` `→` |
-
-#### 假人 Infantry
-
-| 功能   | 按键              |
-|------|-----------------|
-| 移动   | `I` `J` `K` `L` |
-| 底盘旋转 | `U` `O`         |
-| 云台旋转 | `F` `V` `C` `B` |
-
-#### 假人切换
-
-* **Tab**：切换活动假人控制权（在多个假人之间循环切换）
-
-#### 自由视角
-
-| 功能   | 操作                        |
-|------|---------------------------|
-| 移动   | `W` `A` `S` `D` + `N` `J` |
-| 视角旋转 | 鼠标拖动                      |
-
----
-
-### 视角切换
-
-* **F3**：切换视角模式
-
-    * 自由视角：全局观察，适合算法调试
-    * 第一人称：操作手视角
-    * 第三人称：机器人行为分析
-
----
-
-### 实用功能
-
-* **F2**：截图（含标注信息）
-* **F4**：调试信息开关
-* **F5**：自瞄订阅开关
-* **1**：采集一帧仿真数据
-
----
-
-## 📝 项目信息
-
-* **原始作者**：Blackjack200
-* **原始团队**：Actor&Thinker 战队
-* **当前维护与改进**：3SE 战队
-* **上游项目**：[Blackjack200/bevy_robomaster_simulator](https://github.com/Blackjack200/bevy_robomaster_simulator)
-* **技术栈**：Rust · Bevy · ROS2(r2r) · Talos IPC
-* **交流方式**：GitHub Issues / Pull Requests
-* **开源协议**：AGPL v3
-
----
-
-## 🌄 演示
-
-<div align="center">
-    <img src="demo.png" width="75%">
-</div>
-
----
-
-## 📜 开源协议说明
-
-本项目采用 **AGPL v3** 协议。
-
-我们选择开放仿真基础设施，是因为 RoboMaster 视觉算法的发展依赖于**可复现的实验环境**。
-通过开放核心能力，希望为社区提供一个可靠的起点，让更多战队能够在此基础上进行验证、扩展与创新。
+默认是完整场景的无窗口高性能模式，加载 `config.performance.toml`，禁用 UI，并显式使用
+TCP 原生 RGBA 图像链路。`--target-only` 只渲染当前目标以获得更高帧率；`--visible`
+加载 `config.toml` 并创建交互窗口。兼容旧文件 RGB/深度链路时可显式加
+`--file-transport`。
+
+## 构建和打包
+
+```bash
+cargo test
+./build-package.sh release
+```
+
+发布流程见 [RELEASE.md](RELEASE.md)，SDK 见 [sdk/README.md](sdk/README.md)，性能口径见 [SIMULATOR_PERFORMANCE.md](SIMULATOR_PERFORMANCE.md)，排障见 [SIMULATOR_TROUBLESHOOTING.md](SIMULATOR_TROUBLESHOOTING.md)。

@@ -1,6 +1,6 @@
 # Reproducible high-throughput simulator configuration.
 # Select it without changing the interactive default:
-#   $env:DAEDALUS_CONFIG = "config.performance.toml"
+#   DAEDALUS_CONFIG=config.performance.toml ./target/release/daedalus
 
 [window]
 present_mode = "immediate"
@@ -55,16 +55,11 @@ enabled = true
 bind = "0.0.0.0:5601"
 
 [auto_aim]
-# This preserves the in-process auto-aim subscription path without launching a
-# WSL/TensorRT process during a renderer benchmark.
+# This preserves the public auto-aim command path without launching a consumer
+# process during a renderer benchmark.
 enabled_on_start = true
-managed_bridge_enabled = false
 command_transport = "udp"
 bridge_mode = "armor"
-wsl_distro = "Ubuntu-OSTEP"
-workspace_dir = "../.."
-talos_ipc_dir = "talos-ipc"
-bridge_workdir = "aim_sim_bridge"
 
 [physics]
 # Control/fixed-update cadence: 250 Hz. Keep one inner substep for the
@@ -78,7 +73,7 @@ tick_divisor = 1
 [vehicle]
 rotation_speed = 7.42
 gimbal_rotation_speed = 3.0
-gimbal_pitch_limit = 0.785
+gimbal_pitch_limit = 0.785 # symmetric: -45 deg down to +45 deg up; 0 is level
 max_speed = 6.0
 linear_acceleration = 6.0
 acceleration_exponent = 2.5

@@ -1,6 +1,6 @@
-use bevy::prelude::*;
 use bevy::camera::RenderTarget;
 use bevy::ecs::schedule::ScheduleLabel;
+use bevy::prelude::*;
 use bevy::window::{WindowRef, WindowResolution};
 use bevy_inspector_egui::bevy_egui::EguiMultipassSchedule;
 
@@ -30,10 +30,7 @@ pub struct DebugWindow;
 #[derive(Component)]
 pub struct DebugWindowCamera;
 
-pub fn setup_debug_window(
-    mut commands: Commands,
-    mut state: ResMut<DebugWindowState>,
-) {
+pub fn setup_debug_window(mut commands: Commands, mut state: ResMut<DebugWindowState>) {
     let window_id = commands
         .spawn((
             Window {
@@ -61,7 +58,10 @@ pub fn setup_debug_window(
 
     state.window_entity = Some(window_id);
     state.camera_entity = Some(camera_id);
-    info!("Debug window spawned: window={:?} camera={:?}", window_id, camera_id);
+    info!(
+        "Debug window spawned: window={:?} camera={:?}",
+        window_id, camera_id
+    );
 }
 
 pub fn toggle_debug_window(

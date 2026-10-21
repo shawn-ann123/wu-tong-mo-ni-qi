@@ -282,9 +282,7 @@ fn should_apply_aim_command(command: NetworkGimbalCommand) -> bool {
 }
 
 fn command_pitch_target_rad(pitch_deg: f32, pitch_limit: f32) -> f32 {
-    (pitch_deg - 90.0)
-        .to_radians()
-        .clamp(-pitch_limit, pitch_limit)
+    pitch_deg.to_radians().clamp(-pitch_limit, pitch_limit)
 }
 
 fn is_command_aligned_for_launch(
@@ -362,11 +360,11 @@ mod tests {
     #[test]
     fn parses_ros_style_command() {
         let command: NetworkGimbalCommand =
-            serde_json::from_str(r#"{"yaw":12.5,"pitch":91.5,"distance":3.2,"fire_advice":true}"#)
+            serde_json::from_str(r#"{"yaw":12.5,"pitch":1.5,"distance":3.2,"fire_advice":true}"#)
                 .unwrap();
 
         assert_eq!(command.yaw_deg(), Some(12.5));
-        assert_eq!(command.pitch_deg(), Some(91.5));
+        assert_eq!(command.pitch_deg(), Some(1.5));
         assert_eq!(command.distance_m(), Some(3.2));
         assert!(command.fire_advice);
     }
@@ -374,11 +372,11 @@ mod tests {
     #[test]
     fn parses_talos_style_command() {
         let command: NetworkGimbalCommand =
-            serde_json::from_str(r#"{"yaw_deg":-4.0,"pitch_deg":90.0,"distance_m":2.0,"fire":1}"#)
+            serde_json::from_str(r#"{"yaw_deg":-4.0,"pitch_deg":0.0,"distance_m":2.0,"fire":1}"#)
                 .unwrap();
 
         assert_eq!(command.yaw_deg(), Some(-4.0));
-        assert_eq!(command.pitch_deg(), Some(90.0));
+        assert_eq!(command.pitch_deg(), Some(0.0));
         assert_eq!(command.distance_m(), Some(2.0));
         assert!(command.fire_advice);
     }
@@ -386,7 +384,7 @@ mod tests {
     #[test]
     fn fire_advice_requires_alignment() {
         let command: NetworkGimbalCommand =
-            serde_json::from_str(r#"{"yaw_deg":0.0,"pitch_deg":90.0,"distance_m":2.0,"fire":1}"#)
+            serde_json::from_str(r#"{"yaw_deg":0.0,"pitch_deg":0.0,"distance_m":2.0,"fire":1}"#)
                 .unwrap();
 
         assert!(!should_launch_from_command(command, false));
@@ -404,7 +402,7 @@ mod tests {
     #[test]
     fn aim_command_applies_without_keyboard_authorization() {
         let command: NetworkGimbalCommand =
-            serde_json::from_str(r#"{"yaw_deg":12.0,"pitch_deg":91.0,"distance_m":2.0}"#).unwrap();
+            serde_json::from_str(r#"{"yaw_deg":12.0,"pitch_deg":1.0,"distance_m":2.0}"#).unwrap();
 
         assert!(should_apply_aim_command(command));
     }
@@ -412,7 +410,7 @@ mod tests {
     #[test]
     fn no_target_aim_command_is_not_applied() {
         let command: NetworkGimbalCommand =
-            serde_json::from_str(r#"{"yaw_deg":12.0,"pitch_deg":91.0,"distance_m":-1.0}"#).unwrap();
+            serde_json::from_str(r#"{"yaw_deg":12.0,"pitch_deg":1.0,"distance_m":-1.0}"#).unwrap();
 
         assert!(!should_apply_aim_command(command));
     }
@@ -425,9 +423,19 @@ mod tests {
     }
 
     #[test]
+    fn public_pitch_zero_sign_and_limit_are_direct() {
+        let limit = 45.0_f32.to_radians();
+        assert_eq!(command_pitch_target_rad(0.0, limit), 0.0);
+        assert!((command_pitch_target_rad(10.0, limit).to_degrees() - 10.0).abs() < 1e-5);
+        assert!((command_pitch_target_rad(-10.0, limit).to_degrees() + 10.0).abs() < 1e-5);
+        assert!((command_pitch_target_rad(60.0, limit).to_degrees() - 45.0).abs() < 1e-5);
+        assert!((command_pitch_target_rad(-60.0, limit).to_degrees() + 45.0).abs() < 1e-5);
+    }
+
+    #[test]
     fn launch_alignment_requires_gimbal_near_command() {
         let command: NetworkGimbalCommand =
-            serde_json::from_str(r#"{"yaw_deg":10.0,"pitch_deg":80.0,"distance_m":2.0}"#).unwrap();
+            serde_json::from_str(r#"{"yaw_deg":10.0,"pitch_deg":-10.0,"distance_m":2.0}"#).unwrap();
         let pitch_limit = 45.0_f32.to_radians();
 
         assert!(is_command_aligned_for_launch(

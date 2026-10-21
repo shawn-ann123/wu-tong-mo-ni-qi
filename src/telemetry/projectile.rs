@@ -377,7 +377,7 @@ mod tests {
             gimbal_pitch_deg: -8.0,
             auto_aim: Some(PendingAutoAimShotContext {
                 yaw_deg: Some(7.0),
-                pitch_deg: Some(82.0),
+                pitch_deg: Some(-8.0),
                 distance_m: Some(4.5),
                 fire_advice: true,
                 aim_aligned: true,

@@ -1,57 +1,67 @@
-# 模拟器公共 SDK 接口
+# 模拟器公共 SDK 与坐标契约
 
-- 契约版本：`DaedalusSimSdk 1.0.0`
-- 生产仓库：`D:\仿真\repos\daedalus-simulator`
+- 契约版本：`DaedalusSimSdk 2.0.0`
 - 生产分支：`main`
-- IPC：`SHM v7`
-- 图像：RGB24，最大且默认 `1440×1080`
+- 平台：Linux
+- IPC：`SHM v7 / ABI revision 2`
+- 图像：RGB24/RGBA32，`1440×1080`
 
-消费者应从模拟器安装 SDK，不得复制 `talos_v1.hpp`：
+消费者必须使用模拟器发布包中的 SDK，不得复制 `talos_v1.hpp`。
 
-```powershell
-Set-Location D:\仿真\repos\daedalus-simulator
-.\scripts\build-release.ps1
+```bash
+cmake -S sdk/cpp -B build/sim-sdk -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build/sim-sdk --parallel
+ctest --test-dir build/sim-sdk --output-on-failure
+cmake --install build/sim-sdk --prefix build/sim-sdk-install
 ```
 
-CMake 消费方式：
-
 ```cmake
-find_package(DaedalusSimSdk 1 REQUIRED CONFIG)
+find_package(DaedalusSimSdk 2 REQUIRED CONFIG)
 target_link_libraries(my_consumer PRIVATE DaedalusSimSdk::DaedalusSimSdk)
 ```
 
-开发时可把 `D:\仿真\repos\daedalus-simulator\build\sim-sdk-install` 加入 `CMAKE_PREFIX_PATH`；正式消费者必须使用 Release 包内的 `sdk` 目录。
+## 坐标系
 
-## 契约内容
+所有坐标系均为右手系。内部 Bevy 空间与对外 ROS/SDK 空间不直接混用。
 
-`daedalus::sim::sdk::v1` 公开版本常量、固定图像上限和以下 ABI：
+| 坐标系 | +X | +Y | +Z | 备注 |
+| --- | --- | --- | --- | --- |
+| Bevy 世界/节点 | 右 | 上 | 后 | 默认前方为 `-Z` |
+| 对外 world/odom | 前 | 左 | 上 | ROS/REP-103 式 FLU |
+| 车体 body/chassis | 前 | 左 | 上 | 线速度、角速度、RPY 均用此系 |
+| 云台逻辑系 | 前 | 左 | 上 | 与 body 同轴，受 yaw/pitch 旋转 |
+| 相机 optical | 右 | 下 | 前 | OpenCV/ROS optical 习惯，深度沿 `+Z` |
+| 图像像素 | 右 | 下 | — | 原点在左上角 |
+
+Bevy 向对外 FLU 的向量映射是：
+
+```text
+x_flu = -z_bevy
+y_flu = -x_bevy
+z_flu =  y_bevy
+```
+
+位置、线速度和角速度都使用该映射；旋转使用同一对齐矩阵做基变换。SDK 中的 `world_frame` 是 ROS odom/FLU，不是 Bevy 原生轴。
+
+## 云台角
+
+- `yaw_deg`：绝对偏航角，绕逻辑 `+Z` 轴；从上向下看，正值向左转。
+- `pitch_deg`：绝对俯仰角，`0°` 是光轴水平，正值抬头，负值低头。
+- 当前配置 `gimbal_pitch_limit=0.785 rad`，所以有效范围约为 `[-45°,+45°]`，包含端点。
+- UDP、ROS2、Talos 命令、`readGimbalState()` 和曝光同步状态全部使用该定义。
+- 超范围命令被对称 clamp；不做旧版偏移兼容。
+
+## 公共 ABI 与传输
 
 - `ShmHeader`：magic、版本、结构大小、生产者 epoch。
-- 三槽 `ImageMeta`：图像序号、曝光时间戳、尺寸、缓冲槽。
-- `CameraInfo` 与位姿三缓冲：相机内参及曝光匹配位姿。
-- `ChassisObservation`：消费者可用的底盘观测。
-- `GroundTruthBatch`、打符真值和 16 槽曝光历史：仅用于标注与验收，严禁作为学习模型输入。
-- `RuntimeState`：跟随状态和运行时云台状态。
-- `GimbalCommand`：自瞄/打符共用的云台与发射命令出口。
-- `tcp_image_v1.hpp`：TCP 图像帧头、像素格式、大小校验和编解码。
-- `endpoints_v1.hpp`：IPC 文件名、环境变量和默认网络端口。
-- `talos_metadata_reader.hpp`：元数据文件映射与稳定快照读取。
-- `tcp_image_client.hpp`：可重连的 latest-only TCP 图像客户端。
-- `udp_gimbal_client.hpp`：无键盘依赖的实时云台/发射命令客户端。
-- `scene_control_client.hpp`：带会话、命令号、应用帧和错误码的场景控制客户端。
+- `ImageMeta`、`CameraInfo`、曝光位姿、`GroundTruthBatch`、`RuntimeState`、`GimbalCommand`。
+- 元数据、真值与状态：`TALOS_IPC_DIR` 指定的 SDK IPC。
+- 图像：TCP `5602`，latest-only。
+- 实时云台/发射命令：UDP `5601`。
+- 场景控制：UDP `5603`，协议 `daedalus.scene-control/2`。
 
-消费者打开 IPC 后必须调用 `isCompatible`；不兼容时立即失败，不得猜测布局。所有跨流关联必须同时校验生产者 epoch、`frame_seq` 和 `timestamp_ns`，不得用相邻帧代替缺失曝光。
-
-## 传输
-
-- 元数据、真值、运行状态、命令：文件支持的 SDK IPC，目录由 `TALOS_IPC_DIR` 明确指定。
-- 图像性能模式：`DAEDALUS_TALOS_IMAGE_TRANSPORT=tcp`，默认监听 `0.0.0.0:5602`；消费者使用 latest-only TCP 接收器。
-- 文件图像模式：只作兼容与同系统调试。1440×1080 跨 Windows/WSL 会因读取期间槽位更新而大量拒帧，不得作为默认配置。
-- 场景控制：`5603/udp`，协议 `daedalus.scene-control/1`；详细操作见 `SCENARIO_CONTROL.md`。
+消费者打开 IPC 后必须检查兼容性。跨流关联必须同时校验 `producer_epoch`、`frame_seq` 和 `timestamp_ns`。
 
 ## 发射语义
 
-- `fire_advice=true` 是开火请求，不是发射成功回执；无目标、命令过期或云台未对齐时模拟器可以拒绝该请求。
-- 所有被接受的手动、UDP 和 Talos 请求最终共用模拟器内的 `ProjectileCooldown`。
-- 最大物理射频固定为 20 Hz，即相邻弹丸最短冷却 0.05 s。配置文件或环境变量可以降低射频，但不能突破该上限。
-- 实际射频应以模拟器 `launch_count` 在稳定采样窗口内的增量除以时间计算，不能以消费者发送频率或 `fire_advice` 为真帧数代替。
+`fire_advice=true` 是开火请求，不是发射成功回执。所有入口共用 `ProjectileCooldown`；最大物理射频 20 Hz，即最短冷却 0.05 s。

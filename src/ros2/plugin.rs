@@ -292,6 +292,7 @@ fn capture_rune(
 
 fn process_subscription(
     time: Res<Time>,
+    config: Res<crate::config::SimulationConfig>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     gimbal_cmd: ResMut<TopicSubscriber<GimbalCmdTopic>>,
@@ -330,7 +331,10 @@ fn process_subscription(
             continue;
         }
         let yaw_f32 = (cmd.yaw as f32).to_radians();
-        let pitch_f32 = (cmd.pitch as f32 - 90.0).to_radians();
+        let pitch_f32 = (cmd.pitch as f32).to_radians().clamp(
+            -config.vehicle.gimbal_pitch_limit,
+            config.vehicle.gimbal_pitch_limit,
+        );
         gimbal_data.local_yaw = yaw_f32;
         gimbal_data.pitch = pitch_f32;
         gimbal_transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw_f32, pitch_f32, 0.0);

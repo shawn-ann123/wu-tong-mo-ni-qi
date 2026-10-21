@@ -33,7 +33,8 @@ pub fn update_camera_follow(
         FollowingType::Robot => {
             // Camera-to-gimbal extrinsic: the camera is mounted on the gimbal.
             // Rotation maps the gimbal frame to the Bevy camera frame so the
-            // optical axis (+Z_camera) follows the gimbal forward (+X_gimbal).
+            // optical axis (+Z optical) follows logical gimbal +X, represented
+            // by -Z in the Bevy gimbal node.
             let gimbal_world_rotation = infantry.rotation * gimbal_transform.rotation;
             let cam_offset_gimbal = Vec3::from_array(ballistics.camera_offset);
             camera_transform.translation =
@@ -141,7 +142,9 @@ mod tests {
         let gimbal_world_rotation = player_rotation * gimbal_local_rotation;
         let offset = Vec3::from_array(BallisticsConfig::default().camera_offset);
 
-        let mut query = app.world_mut().query_filtered::<&Transform, With<MainCamera>>();
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&Transform, With<MainCamera>>();
         let camera = query.single(app.world()).expect("camera exists");
 
         let expected_translation = player_translation + gimbal_world_rotation * offset;

@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use bevy_inspector_egui::bevy_egui::EguiContexts;
 use bevy_inspector_egui::egui;
 
-use crate::components::{Controlled, Infantry, InfantryGimbal};
 use super::DebugWindowState;
+use crate::components::{Controlled, Infantry, InfantryGimbal};
 
 #[derive(Resource)]
 pub struct TelemetryWindowState {
@@ -55,7 +55,8 @@ pub fn telemetry_window_system(
                     // Chassis world position (always shown first)
                     if let Some(chassis_transform) = chassis_query.iter().next() {
                         let pos = chassis_transform.translation;
-                        let (chassis_yaw, _, _) = chassis_transform.rotation.to_euler(EulerRot::YXZ);
+                        let (chassis_yaw, _, _) =
+                            chassis_transform.rotation.to_euler(EulerRot::YXZ);
 
                         ui.label("World Position X");
                         ui.monospace(format!("{:.4} m", pos.x));
@@ -70,7 +71,11 @@ pub fn telemetry_window_system(
                         ui.end_row();
 
                         ui.label("Chassis Yaw");
-                        ui.monospace(format!("{:.4} rad  ({:.2}°)", chassis_yaw, chassis_yaw.to_degrees()));
+                        ui.monospace(format!(
+                            "{:.4} rad  ({:.2}°)",
+                            chassis_yaw,
+                            chassis_yaw.to_degrees()
+                        ));
                         ui.end_row();
                     }
 

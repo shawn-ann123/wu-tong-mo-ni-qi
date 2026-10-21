@@ -28,7 +28,10 @@ const MAX_FAST_READBACK_BUFFERS: usize = 3;
 // UMA systems (Intel iGPU, AMD APU) share memory between CPU and GPU, so staging
 // buffer allocation is cheaper and map_async is essentially zero-copy. We can
 // afford more in-flight buffers to reduce synchronization stalls.
-const MAX_FAST_READBACK_BUFFERS_UMA: usize = 5;
+// 1440x1080 RGBA readback from Intel UMA memory is bandwidth-latency bound.
+// Eight leases let the async pool overlap mapped row copies across the CPU's
+// performance cores while keeping the total staging footprint around 49 MiB.
+const MAX_FAST_READBACK_BUFFERS_UMA: usize = 8;
 static CAPTURE_COPY_SUBMIT_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CAPTURE_QUEUE_DROP_TOTAL: AtomicU64 = AtomicU64::new(0);
 static CAPTURE_PROCESSING_COMPLETE_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -812,7 +815,7 @@ pub trait GpuCaptureHandler: Send + Sync + 'static {
 
 fn premap_owned_rgba_fast_path(
     frame_kind: CapturedFrameKind,
-    width: u32,
+    _width: u32,
     texture_format: TextureFormat,
     snapshots: &[DynSnapshotSync],
 ) -> bool {
@@ -827,8 +830,7 @@ fn premap_owned_rgba_fast_path(
         return false;
     }
 
-    let row_bytes = width as usize * 4;
-    RenderDevice::align_copy_bytes_per_row(row_bytes) == row_bytes
+    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -877,9 +879,23 @@ fn notify_fast_map_completion(
     );
 }
 
-fn copy_fast_mapped_bytes(mapped: &[u8]) -> Vec<u8> {
+fn copy_fast_mapped_rgba(mapped: &[u8], width: u32, height: u32, format: TextureFormat) -> Vec<u8> {
     let started = Instant::now();
-    let bytes = mapped.to_vec();
+    let row_bytes = width as usize * 4;
+    let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
+    let bytes = if row_bytes == aligned_row_bytes {
+        mapped.to_vec()
+    } else {
+        let mut tight = Vec::with_capacity(row_bytes * height as usize);
+        for row in mapped.chunks(aligned_row_bytes).take(height as usize) {
+            tight.extend_from_slice(&row[..row_bytes.min(row.len())]);
+        }
+        tight
+    };
+    debug_assert!(matches!(
+        format,
+        TextureFormat::Rgba8UnormSrgb | TextureFormat::Rgba8Unorm
+    ));
     CAPTURE_FAST_MAPPED_COPY_TOTAL.fetch_add(1, Ordering::Relaxed);
     record_duration(
         &CAPTURE_FAST_MAPPED_COPY_NS_TOTAL,
@@ -1137,19 +1153,19 @@ fn receive_image_from_buffer(mut world: DeferredWorld) {
             .spawn(async move {
                 let _processing_guard = processing_guard;
                 let mut fast_readback = fast_readback;
-                let padded = match r.await {
-                    Ok(MapReadbackCompletion::Legacy(bytes)) => bytes,
+                let (mapped_bytes, already_tight_rgba) = match r.await {
+                    Ok(MapReadbackCompletion::Legacy(bytes)) => (bytes, false),
                     Ok(MapReadbackCompletion::Fast(FastMapStatus::Success)) => {
                         let buffer = fast_readback
                             .take()
                             .expect("fast map completion must own one staging buffer");
                         let buffer_slice = buffer.buffer().slice(..);
                         let data = buffer_slice.get_mapped_range();
-                        let bytes = copy_fast_mapped_bytes(&data);
+                        let bytes = copy_fast_mapped_rgba(&data, width, height, texture_format);
                         drop(data);
                         buffer.buffer().unmap();
                         buffer.recycle();
-                        bytes
+                        (bytes, true)
                     }
                     Ok(MapReadbackCompletion::Fast(FastMapStatus::Error)) => {
                         fast_readback
@@ -1173,8 +1189,8 @@ fn receive_image_from_buffer(mut world: DeferredWorld) {
                 };
                 let frame_bytes = match frame_kind {
                     CapturedFrameKind::Rgb8 => {
-                        padded_rgba_to_rgb(&padded, width, height, texture_format).unwrap_or_else(
-                            || {
+                        padded_rgba_to_rgb(&mapped_bytes, width, height, texture_format)
+                            .unwrap_or_else(|| {
                                 let pixel_size = texture_format
                                     .pixel_size()
                                     .expect("Unsupported capture texture format");
@@ -1182,7 +1198,7 @@ fn receive_image_from_buffer(mut world: DeferredWorld) {
                                 let aligned_row_bytes =
                                     RenderDevice::align_copy_bytes_per_row(row_bytes);
                                 let unpadded =
-                                    unpad_rows(&padded, row_bytes, aligned_row_bytes, height);
+                                    unpad_rows(&mapped_bytes, row_bytes, aligned_row_bytes, height);
                                 let mut bevy_image = Image::new_target_texture(
                                     width,
                                     height,
@@ -1191,12 +1207,15 @@ fn receive_image_from_buffer(mut world: DeferredWorld) {
                                 );
                                 bevy_image.data = Some(unpadded);
                                 bevy_image.try_into_dynamic().unwrap().to_rgb8().into_raw()
-                            },
-                        )
+                            })
                     }
                     CapturedFrameKind::Rgba8 => {
-                        native_rgba_frame_bytes(padded, width, height, texture_format)
-                            .expect("RGBA capture requires an RGBA8 texture format")
+                        if already_tight_rgba {
+                            mapped_bytes
+                        } else {
+                            native_rgba_frame_bytes(mapped_bytes, width, height, texture_format)
+                                .expect("RGBA capture requires an RGBA8 texture format")
+                        }
                     }
                     CapturedFrameKind::Depth32F => {
                         let pixel_size = texture_format
@@ -1204,7 +1223,7 @@ fn receive_image_from_buffer(mut world: DeferredWorld) {
                             .expect("Unsupported depth capture texture format");
                         let row_bytes = width as usize * pixel_size;
                         let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
-                        unpad_rows(&padded, row_bytes, aligned_row_bytes, height)
+                        unpad_rows(&mapped_bytes, row_bytes, aligned_row_bytes, height)
                     }
                 };
 
@@ -1324,7 +1343,7 @@ mod tests {
     use super::{
         CaptureConfig, CapturedFrame, CapturedFrameKind, FastMapStatus, FastReadbackReservation,
         FastReadbackSlotState, MapReadbackCompletion, SnapshotAsync, SnapshotSync,
-        SubmittedEvictionAction, capture_pipeline_counters, copy_fast_mapped_bytes,
+        SubmittedEvictionAction, capture_pipeline_counters, copy_fast_mapped_rgba,
         dispatch_captured_frame, fast_queue_admits_copy, native_rgba_frame_bytes,
         notify_fast_map_completion, premap_owned_rgba_fast_path, record_fast_no_buffer_drop,
     };
@@ -1428,7 +1447,7 @@ mod tests {
     }
 
     #[test]
-    fn premap_fast_path_requires_one_opted_in_aligned_native_rgba_consumer() {
+    fn premap_fast_path_requires_one_opted_in_native_rgba_consumer() {
         let snapshots: Vec<Box<dyn SnapshotSync>> = vec![Box::new(RecordingSync {
             accepts_owned_rgba: true,
         })];
@@ -1450,7 +1469,7 @@ mod tests {
             TextureFormat::Bgra8UnormSrgb,
             &snapshots,
         ));
-        assert!(!premap_owned_rgba_fast_path(
+        assert!(premap_owned_rgba_fast_path(
             CapturedFrameKind::Rgba8,
             1,
             TextureFormat::Rgba8UnormSrgb,
@@ -1533,6 +1552,22 @@ mod tests {
             capture_pipeline_counters().fast_no_buffer_drop_total,
             counters_before.fast_no_buffer_drop_total + 1
         );
+    }
+
+    #[test]
+    fn uma_fast_readback_uses_eight_bounded_slots() {
+        let mut slots = FastReadbackSlotState::new(true);
+        for _ in 0..8 {
+            assert_eq!(
+                slots.try_reserve(false),
+                Some(FastReadbackReservation::Allocate)
+            );
+        }
+        assert_eq!(slots.try_reserve(false), None);
+        assert_eq!((slots.allocated, slots.in_flight), (8, 8));
+        for _ in 0..8 {
+            slots.release_retired();
+        }
     }
 
     #[test]
@@ -1637,12 +1672,17 @@ mod tests {
     }
 
     #[test]
-    fn fast_worker_copy_preserves_exact_bytes_and_counts_one_copy() {
+    fn fast_worker_copy_removes_row_padding_and_counts_one_copy() {
         let _guard = FAST_COUNTER_TEST_LOCK.lock().unwrap();
         let counters_before = capture_pipeline_counters();
-        let source = [1, 2, 3, 4, 5, 6, 7, 8];
+        let mut source = vec![0_u8; 256 * 2];
+        source[..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        source[256..264].copy_from_slice(&[9, 10, 11, 12, 13, 14, 15, 16]);
 
-        assert_eq!(copy_fast_mapped_bytes(&source), source);
+        assert_eq!(
+            copy_fast_mapped_rgba(&source, 2, 2, TextureFormat::Rgba8UnormSrgb),
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        );
 
         let counters_after = capture_pipeline_counters();
         assert_eq!(

@@ -7,6 +7,8 @@ cd "$SCRIPT_DIR"
 BINARY="target/release/daedalus"
 BUILD_MODE="release"
 VISIBLE=0
+TARGET_ONLY=0
+FILE_TRANSPORT=0
 IPC_DIR="${TALOS_IPC_DIR:-$SCRIPT_DIR/runtime/talos-ipc}"
 
 usage() {
@@ -16,6 +18,9 @@ Usage: ./start-simulator.sh [OPTIONS]
 Options:
   --debug         Use debug build instead of release
   --visible       Enable visible window mode (default: performance)
+  --target-only   Render only the active target in performance mode (maximum FPS)
+  --file-transport
+                  Use compatibility file RGB/depth transport instead of TCP
   --ipc-dir PATH  Set TALOS IPC directory (default: ./runtime/talos-ipc)
   --skip-build    Skip build step, run existing binary
   --help, -h      Show this help
@@ -41,6 +46,8 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --debug) BUILD_MODE="debug"; BINARY="target/debug/daedalus"; shift ;;
         --visible) VISIBLE=1; shift ;;
+        --target-only) TARGET_ONLY=1; shift ;;
+        --file-transport) FILE_TRANSPORT=1; shift ;;
         --ipc-dir)
             [[ $# -ge 2 ]] || { echo "--ipc-dir requires a value" >&2; exit 2; }
             IPC_DIR="$2"; shift 2 ;;
@@ -76,9 +83,28 @@ export WGPU_POWER_PREF="high"
 export RUST_LOG=info
 
 if [[ "$VISIBLE" == 1 ]]; then
-    export DAEDALUS_RELEASE_MODE="visible"
+    export DAEDALUS_CONFIG="$SCRIPT_DIR/config.toml"
+    unset DAEDALUS_PERF_DISABLE_UI
+    unset DAEDALUS_CAPTURE_SCENE_PROFILE
+    RUN_MODE="visible"
 else
-    export DAEDALUS_RELEASE_MODE="performance"
+    export DAEDALUS_CONFIG="$SCRIPT_DIR/config.performance.toml"
+    export DAEDALUS_PERF_DISABLE_UI=1
+    if [[ "$TARGET_ONLY" == 1 ]]; then
+        export DAEDALUS_CAPTURE_SCENE_PROFILE=aim
+        RUN_MODE="performance/aim"
+    else
+        export DAEDALUS_CAPTURE_SCENE_PROFILE=full
+        RUN_MODE="performance/full-scene"
+    fi
+fi
+
+if [[ "$FILE_TRANSPORT" == 1 ]]; then
+    export DAEDALUS_TALOS_IMAGE_TRANSPORT=file
+    IMAGE_TRANSPORT="file-rgb-depth"
+else
+    export DAEDALUS_TALOS_IMAGE_TRANSPORT=tcp
+    IMAGE_TRANSPORT="tcp-native-rgba"
 fi
 
 if command -v vulkaninfo &> /dev/null; then
@@ -89,8 +115,11 @@ fi
 
 echo "=== Daedalus Simulator (Intel iGPU Optimized) ==="
 echo "GPU auto-selection: NVIDIA > Intel > CPU"
-echo "Debug window: press \` (backtick) to toggle"
-echo "Mode=$DAEDALUS_RELEASE_MODE  IPC=$TALOS_IPC_DIR"
+if [[ "$VISIBLE" == 1 ]]; then
+    echo "Debug window: press \` (backtick) to toggle"
+fi
+echo "Mode=$RUN_MODE  Transport=$IMAGE_TRANSPORT"
+echo "Config=$DAEDALUS_CONFIG  IPC=$TALOS_IPC_DIR"
 echo ""
 
 exec "$BINARY"

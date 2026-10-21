@@ -1,195 +1,58 @@
-# Daedalus Simulator 1.0.3 构建、运行与性能基线
+# Daedalus Simulator 2.0.0 Linux 性能口径
 
-- 适用仓库/分支：`daedalus-simulator/main`
-- 本机固定目录：`D:\仿真\repos\daedalus-simulator`
-- 正式 Release：`D:\仿真\releases\daedalus-simulator\1.0.3`
-- 公共 SDK：`DaedalusSimSdk 1.0.0`，`SHM v7 ABI r1`
+本文档定义当前可用的复现方式。`benchmarks/1.0.0/` 中的 Windows 结果只是历史证据，不是 2.0.0 Linux 基线，不得用于当前性能承诺。
 
-本文是模拟器性能配置和公开基线的权威文档。机器可读结果见
-[`benchmarks/1.0.0/performance-2026-07-18.json`](benchmarks/1.0.0/performance-2026-07-18.json)。
+## 固定条件
 
-## 固定基线
+- Release 构建，Linux/Vulkan。
+- RGB24/RGBA32 `1440×1080`。
+- 物理 250 Hz，高性能采集上限 200 Hz。
+- TCP `5602` latest-only 图像；UDP `5601` 云台；UDP `5603` 场景控制。
+- 发射物理上限 20 Hz。
 
-- 图像：RGB24，`1440×1080`，单帧 4,665,600 字节；
-- 物理：250 Hz，单 substep；
-- 高性能采集上限：200 Hz；
-- Windows 渲染后端：高性能模式使用 DX12；可视验收模式使用 Vulkan；
-- Windows/WSL 图像数据面：TCP 5602，latest-only；
-- 元数据、曝光位姿和真值：SDK IPC；
-- 云台命令：UDP 5601；场景控制：UDP 5603；
-- 模拟器物理发射上限：20 Hz（最短冷却 0.05 s）；消费者可以更慢，但不能提高该上限；
-- 只使用 Release 构建测性能，禁止用 Debug 帧率代替。
+## 模式
 
-200 Hz 是配置上限，不是承诺帧率。实际吞吐由渲染、GPU readback、TCP、消费者推理和机器后台负载共同决定。
-
-## 构建和正式打包
-
-```powershell
-Set-Location D:\仿真\repos\daedalus-simulator
-cargo build --release --features talos
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-release.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package-release.ps1
+```bash
+./start-simulator.sh
+./start-simulator.sh --target-only
+./start-simulator.sh --visible
 ```
 
-开发构建位于 `target\release\daedalus.exe`。日常运行和消费者验证必须使用
-`D:\仿真\releases\daedalus-simulator\<version>`；SDK 与 Release 规则见 `RELEASE.md`。
+默认模式加载 `config.performance.toml`、禁用 UI、使用 TCP 原生 RGBA latest-only 传输，
+并保留完整场馆图像。需要最大帧率且算法只需要当前目标时使用 `--target-only`；该模式保留
+250 Hz 物理、真值和控制，但图像中不包含完整场馆。可见模式加载 `config.toml`。只有兼容
+旧的文件 RGB/深度消费者时才使用 `--file-transport`，该路径会增加 GPU 深度复制和 CPU
+文件映射开销。
 
-## 两种运行模式
+性能模式不会创建主窗口、调试窗口或对应的 UI 相机。启动脚本显式设置图像传输和采集场景，
+因此直接运行二进制时的兼容性默认值不代表正式高性能启动定义。
 
-### 默认：高性能模式
+## 本机优化实测
 
-```powershell
-Set-Location D:\仿真\releases\daedalus-simulator\1.0.3
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-simulator.ps1
-```
+2026-10-21 在 Intel Core Ultra 5 225H / Intel(R) Graphics (ARL)、Mesa 26.0.8、
+1440×1080、物理 250 Hz、无 TCP 消费者条件下预热后测得：
 
-该模式设置 `DAEDALUS_PERF_DISABLE_UI=1`，不创建主窗口、不拉起靶场前端
-debug 子进程，禁用 Winit 桌面事件循环，改用无窗口 `ScheduleRunnerPlugin` 持续运行；
-离屏 Talos 相机仍持续渲染、readback 并向消费者发布图像。
-没有前端窗口不代表没有图像采集；判断采集是否正常应读取
-`capture_copy_submit_hz`、`capture_processing_complete_total` 和消费者输入计数。
+- 旧启动实际落入文件 RGB/深度全场景路径：约 28 Hz。
+- TCP 原生 RGBA 全场景：约 30 Hz。
+- 优化后的 TCP 原生 RGBA 完整场景：约 95 Hz，物理约 249 Hz。
+- 优化后的 TCP 原生 RGBA `--target-only`：约 124 Hz，物理约 249 Hz。
 
-### 可视验收模式
+优化后的 1440 像素宽图像允许带行 padding 的 GPU 映射进入 UMA 快速路径，由 8 个有界
+读回槽并行完成一次式去 padding；旧路径每帧需要两次整图复制，且这条快速路径实际未启用。
+上述两组优化后实测的采集队列丢帧和 GPU map 错误均为 0。
 
-```powershell
-Set-Location D:\仿真\releases\daedalus-simulator\1.0.3
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-simulator.ps1 -Visible
-```
+这些数值是当前开发机的诊断结果，不是跨机器性能承诺。连接真实消费者后还必须同时记录
+`talos_tcp_image_sent_hz`；无消费者时它为 0，只能用 `capture_copy_submit_hz` 衡量生产端。
 
-该模式默认选择 Vulkan 并启用最高 60 Hz 的可见预览，只用于人工检查画面、相机和场景。默认采集仍是离屏 1440×1080 图像，不应把 `preview_present_hz` 当成采集帧率。
+## 报告要求
 
-启动器也接受显式后端参数，供诊断使用：
+每次基线必须记录版本/提交、GPU 与驱动、配置哈希、预热时间、采样窗口和后台负载，并同时报告：
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-simulator.ps1 -Visible -RenderBackend vulkan
-```
+- `main_update_hz`
+- `capture_copy_submit_hz`
+- `talos_tcp_image_sent_hz`
+- `preview_present_hz`
+- 采集队列丢帧、GPU map 错误、TCP 错误
+- 消费者完整视觉频率和曝光身份匹配情况
 
-不要把 `-Visible -RenderBackend dx12` 作为正式验收配置。本机 Windows 11、RTX 4060 Laptop、驱动 572.70 上，DX12 可见交换链在窗口重配置时可复现 `ResizeBuffers failed: window is in use`，随后 Bevy 报 `Surface::configure / Invalid surface` 并退出；同一 Release 改为 Vulkan 后，靶场切换、运动靶、1440×1080 离屏采集和 TensorRT 消费链路均正常。该问题不影响默认无窗口 DX12 高性能模式。
-
-## 自瞄 B + TensorRT
-
-从消费者仓库启动：
-
-```powershell
-Set-Location D:\仿真\repos\aim-stack
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\run-autoaim-b.ps1
-```
-
-启动器会同时启动正式模拟器 Release 和 WSL 自瞄 B。TensorRT 属于消费者推理后端，不由模拟器自动加载；启动器默认设置 `AIM_SIM_WITH_VIVSIONN_TRT=ON`，使用 `D:\仿真\models\engines\armor.engine`。首次运行或缓存清理后会自动按正式 SDK 重建桥接器。
-
-## 当前与历史实测
-
-### 1.0.3 无窗口调度节拍修复
-
-`1.0.2` 首次联合消费者验收发现，无窗口 `ScheduleRunnerPlugin` 的零等待忙循环会让
-渲染/readback 队列积压：TCP 完整帧约 27.9 Hz，消费者图像源年龄增长到 13.49 s，
-exact-exposure 匹配失败，完整视觉结果为 0。`1.0.3` 将后台主循环设置为 1 ms 有界节拍，
-保持无 Winit、无桌面窗口与 20 Hz 物理射频硬上限不变，并以完整消费者链路复验
-图像源年龄、exact-exposure、视觉吞吐和实际射频。
-
-正式 `1.0.3`（source `c2458368ef565472a98fda48f7b8612b20b270fb`）复验通过：
-纯模拟器无桌面窗口，主循环/采集约 91.45 Hz、物理约 250.5 Hz；5 m 原生 Shooting
-Range 静止 3 号靶完整链路中，图像源年龄约 42.54 ms，exact-exposure 有效，完整视觉
-约 64 Hz，45 秒发射 151 发并得到 151 个聚合 `accurate`。全窗口实际射频 3.356 Hz，
-首发至末发活跃段 6.708 Hz；后半段消费者检测器持续失去目标，因此射频损失不来自模拟器
-物理冷却。独立向 5601/UDP 以约 63.48 Hz 提交请求并设置 200 Hz 越权覆盖时，1.0.3
-仍固定 52 ms 逐发间隔、饱和 19.2308 Hz，`MainWindowHandle=0`。
-
-### 1.0.2 高性能无窗口与物理射频验收
-
-`1.0.2` 在高性能模式下不创建 Bevy 主窗口，也不启动靶场前端 debug 子进程，
-同时禁用 Winit 桌面事件循环，使用 `ScheduleRunnerPlugin` 保持纯后台运行；
-`-Visible` 的 Vulkan 可视验收行为不变。SDK 仍为 `1.0.0`，SHM/ABI 和场景控制协议均未改变。
-
-模拟器将所有手动、UDP 和 Talos 自动开火请求统一交给 `ProjectileCooldown`。
-配置文件与环境变量都只能把射频调低：任何短于 0.05 s 的冷却都会在模拟器内部钳制为
-0.05 s，因此消费者连续提交超过 20 Hz 的 `fire_advice=true` 也不能突破物理发射上限。
-
-2026-07-27 的正式 `1.0.2`（source `d7551dd3db55f6c1f4f7cd3be138c91380574dc4`）
-验收中，后台进程持续运行，`MainWindowHandle=0`，物理步进约 249.9 Hz，UDP 5601/5603
-持续监听。测试故意设置 `DAEDALUS_PROJECTILE_FIRE_RATE_HZ=200`，再以 62.98 Hz 连续
-提交开火请求 20 秒；模拟器仍只发射 380 发，逐发事件的 379 个相邻间隔均为 52 ms，
-饱和实际射频为 19.2308 Hz，证明环境变量不能突破模拟器上限。
-
-实际值低于 20.00 Hz 是 250 Hz 固定物理步长的量化结果：4 ms 一步，0.05 s 冷却需要
-13 步才完成，即 52 ms；这不是消费者限频。完整自瞄的静止靶实际射频另按消费者版本锁
-与原生 Shooting Range 场景记录。
-
-### 1.0.1 可见模式修复验收
-
-`1.0.1` 仅改变发布启动器的渲染后端选择，不改变模拟器二进制逻辑、SDK 或 IPC。正式候选包完成以下回归：
-
-| 模式 | 采样 | 主更新 Hz | 采集/TCP Hz | 物理 Hz | 预览 Hz | B 完整视觉 Hz | 端到端平均 / P95 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Vulkan 可见靶场 + B/TensorRT | 60 s | 108.12 | 108.12 / 108.12 | 250.00 | 59.95 | 108.13 | 32.46 / 41.82 ms |
-| DX12 高性能纯模拟器 | 20 s | 168.25 | 152.26 / 不适用 | 250.01 | 0 | 未运行 | 不适用 |
-
-可见联合测试运行到 119.137 秒时，主窗口和独立自瞄调试窗口均保持响应；完成 9509 个视觉结果，后端为 `vivsionn_trt`，曝光真值严格匹配。两项测试的采集队列丢帧、GPU map 错误均为 0；联合测试 TCP 读写错误也为 0。靶场通过 SDK ACK 确认切换完成，3 号靶车按 1.5 m/s 往复平移和 45°/s 自转。
-
-### 被测版本和环境
-
-| 项目 | 值 |
-| --- | --- |
-| 模拟器 Release | `1.0.0` / tag `simulator-v1.0.0` / source `5ce9369e83a289edd8c5969c1dfd7ae784fccb94` |
-| 模拟器二进制 SHA256 | `5E20FA25356E50F6ADBC2E904A208D007396ED5B86DA9737AFB2EDE7BC8BAB6B` |
-| 自瞄消费者提交 | `946f90fa52eae577c5bca9b1d202127d10242e9a` |
-| 装甲模型 | FP16 TensorRT，输入 `1×3×640×640` |
-| 模型 SHA256 | `BF3DB6F2F9A6D71371E1D82CC9F03467EC9B3BD71E0549689E410469E2B839D4` |
-| CPU / 内存 | Intel Core i9-14900HX，24C/32T；32 GiB |
-| GPU | NVIDIA GeForce RTX 4060 Laptop GPU，8188 MiB，驱动 572.70 |
-| 系统 / 电源计划 | Windows 11 Pro build 26200；`Codex Gaming Stability Test` |
-| 渲染 / 推理工具链 | DX12；GCC 11.4；CMake 3.22.1；CUDA 12.8；TensorRT 10.9.0.34 |
-
-测试前没有游戏、模拟器或自瞄进程。保留用户桌面程序时，10 次空载 GPU 采样为 29%–33%、显存 2584–2597 MiB、功耗 9.90–10.05 W，因此本结果不是“绝对净空机器最佳值”，而是该后台状态下的可复现工作基线。
-
-### 测量口径
-
-- 纯模拟器：预热 8 秒，之后每秒读取一次 `DAEDALUS_STATS_JSON`，连续 20 秒；
-- 联合模式：桥接器已处理 100 帧后再预热 15 秒，之后连续采样 30 秒；
-- 表中主值为采样窗口均值，括号内为中位数；范围为每秒统计的最小值到最大值；
-- `main_update_hz` 是模拟器主更新频率，旧字段 `render_fps` 只是它的兼容别名；
-- `capture_copy_submit_hz` 是离屏图像 GPU copy 提交率；
-- `tcp_image_sent_hz` 是有 TCP 消费者时的实际图像发送率；
-- `completed_vision_rolling_hz` 是自瞄完整视觉结果滚动频率；
-- 联合模式的 `pipeline_latency_mean_ms` 是运行至该采样点的累计流水线均值，不是 P99。
-
-### 稳定结果
-
-| 模式 | 主更新 Hz | 离屏采集提交 Hz | TCP 图像 Hz | 物理 Hz | 可见预览 Hz | B 完整视觉 Hz | 流水线均值 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 高性能，纯模拟器，无 TCP 消费者 | 177.199 (180.070) | 160.009 (160.366) | 不适用 | 250.022 (249.914) | 0 | 未运行 | 不适用 |
-| 可视验收，纯模拟器，历史 DX12 复测 | 158.298 (158.751) | 153.015 (152.501) | 不适用 | 250.009 (249.932) | 60.010 (59.827) | 未运行 | 不适用 |
-| 高性能，模拟器 + 自瞄 B/TensorRT | 121.565 (122.913) | 121.333 (121.921) | 121.366 (121.921) | 249.963 (249.859) | 0 | 121.233 (122.000) | 6.032 ms |
-
-每秒统计范围：
-
-| 模式 | 主更新 | 采集/TCP | 完整视觉 | GPU 利用率 | GPU 功耗 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| 高性能纯模拟器 | 138.399–191.365 Hz | 138.399–169.763 Hz | 不适用 | 27%–44% | 14.96–19.17 W |
-| 可视验收历史 DX12 复测 | 144.915–169.771 Hz | 142.917–159.539 Hz | 不适用 | 31%–43% | 15.13–17.97 W |
-| 高性能 + 自瞄 B | 106.648–135.964 Hz | TCP 106.648–133.979 Hz | 106–132 Hz | 31%–41% | 25.30–34.20 W |
-
-联合运行最终计数：自瞄处理 6133 帧、完成 6122 个视觉结果；模拟器发送 6123 帧；曝光真值严格匹配；采集队列丢帧 0；GPU map 错误 0。桥接器后端日志为 `vivsionn_trt`，UDP 云台输出保持启用。
-
-第一轮可视测试中出现过一次 7.073 Hz 的单秒停顿，使该轮主更新均值降到 153.376 Hz；立即复测后 20 秒范围稳定为 144.915–169.771 Hz。机器可读文件同时保留第一轮和复测摘要，不隐藏异常样本。
-
-### 历史结果为什么不同
-
-旧实验曾得到纯模拟器约 199.79 Hz，以及 B + TensorRT 约 140.81/139.41 Hz。它们使用了不同的文件/TCP组合、统计窗口或后台负载，只保留为历史最佳参考，不能替代上表当前基线。尤其 Windows/WSL 不得使用文件三缓冲图像模式：旧长测只有约 0.49 个有效输入/秒，因此自瞄 B 固定使用 TCP。
-
-## 复现检查表
-
-1. 两个仓库都必须为文档记录的提交或其明确后继，并保持 `git status --short` 为空；
-2. 校验 Release 二进制与模型 SHA256；
-3. 使用 1440×1080、Release、TCP、250 Hz 和 200 Hz capture cap；高性能模式用 DX12，可视验收模式用 Vulkan；
-4. 记录电源计划，并在启动前用 `nvidia-smi` 连续采样空载 GPU；
-5. 设置统计输出后启动：
-
-```powershell
-$env:DAEDALUS_STATS_JSON='D:\仿真\runtime\perf\simulator.json'
-$env:DAEDALUS_P1_TIMING='1'
-```
-
-6. 不得用可见预览帧率、主更新兼容别名或“配置上限 200 Hz”冒充实际图像吞吐；
-7. 联合测试必须同时报告模拟器 TCP 发送、自瞄完整视觉结果、流水线延迟、丢帧和曝光匹配；
-8. 原始日志可在结论固化后删除，受 Git 跟踪的 JSON 摘要和本文是长期证据。
+200 Hz 是配置上限，可见预览频率也不等于离屏采集频率。在 Linux 2.0.0 正式重测并写入带哈希的机器可读结果前，不声明新的数值基线。

@@ -5,7 +5,6 @@ use std::path::PathBuf;
 
 use crate::components::{SlapperInfantry, SubscribeAutoAim};
 use crate::config::SimulationConfig;
-use crate::integrated_auto_aim::IntegratedAutoAimBridge;
 use crate::robomaster::prelude::{Armor, ArmorStickerSelection};
 use crate::statistic::ProjectileStatistics;
 use crate::systems::FrequencyMetrics;
@@ -41,17 +40,12 @@ pub fn spawn_text(commands: &mut Commands) {
 pub fn update_help_text(
     mut text: Query<&mut Text, With<HelpText>>,
     auto_aim: Res<SubscribeAutoAim>,
-    bridge: Option<Res<IntegratedAutoAimBridge>>,
     stats: Res<ProjectileStatistics>,
 ) {
-    let bridge_status = bridge
-        .as_deref()
-        .map(IntegratedAutoAimBridge::status_label)
-        .unwrap_or("N/A");
     for mut text in text.iter_mut() {
         *text = create_help_text(
             auto_aim.load(std::sync::atomic::Ordering::Acquire),
-            bridge_status,
+            "external",
             &stats,
         );
     }
@@ -60,7 +54,6 @@ pub fn update_help_text(
 pub fn export_debug_stats(
     time: Res<Time>,
     auto_aim: Res<SubscribeAutoAim>,
-    bridge: Option<Res<IntegratedAutoAimBridge>>,
     stats: Res<ProjectileStatistics>,
     config: Option<Res<SimulationConfig>>,
     frequency: Option<Res<FrequencyMetrics>>,
@@ -79,10 +72,7 @@ pub fn export_debug_stats(
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let bridge_status = bridge
-        .as_deref()
-        .map(IntegratedAutoAimBridge::status_label)
-        .unwrap_or("N/A");
+    let bridge_status = "external";
     let auto_aim = auto_aim.load(std::sync::atomic::Ordering::Acquire);
     let frequency = frequency
         .as_deref()

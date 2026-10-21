@@ -52,23 +52,16 @@ tag_default = 0
 intensity_default = 1000.0
 
 [network_bridge]
-# UDP JSON command bridge for WSL algorithms driving the Windows-rendered simulator.
-# Send to this address from WSL using the Windows host IP and port 5601.
+# Public UDP JSON command bridge for external consumers.
 enabled = true
 bind = "0.0.0.0:5601"
 
 [auto_aim]
 # Start with external auto-aim command receive enabled when true. F5 still toggles it at runtime.
 enabled_on_start = false
-# Let the simulator own the hidden WSL TensorRT bridge lifecycle.
-managed_bridge_enabled = true
-# Integrated bridge sends commands over UDP by default to avoid duplicate Talos command consumption.
+# External consumers send commands over the selected public transport.
 command_transport = "udp"
 bridge_mode = "armor"
-wsl_distro = "Ubuntu-OSTEP"
-workspace_dir = "../.."
-talos_ipc_dir = "talos-ipc"
-bridge_workdir = "aim_sim_bridge"
 
 [physics]
 fixed_hz = 250.0                # fixed physics/control ticks per second
@@ -77,7 +70,7 @@ substep_count = 8               # physics substeps per fixed tick
 [vehicle]
 rotation_speed = 7.42            # rad/s - chassis rotation speed
 gimbal_rotation_speed = 3.0     # rad/s - gimbal rotation speed
-gimbal_pitch_limit = 0.785      # rad - gimbal pitch limit (~45 degrees)
+gimbal_pitch_limit = 0.785      # rad - symmetric limit: -45 deg down to +45 deg up; 0 is level
 max_speed = 6.0                 # m/s - maximum vehicle speed
 linear_acceleration = 6.0       # m/s^2 - linear acceleration
 acceleration_exponent = 2.5    # exponent for non-linear acceleration curve

@@ -1,5 +1,5 @@
-use bevy::input::mouse::MouseButtonInput;
 use bevy::input::ButtonState;
+use bevy::input::mouse::MouseButtonInput;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_inspector_egui::bevy_egui::{EguiContexts, egui};
@@ -13,11 +13,11 @@ use crate::setup::{
     AutoAimSceneMode, AutoAimSceneState, ShootingRangeTarget, ShootingRangeTargetKind,
 };
 
+use super::DebugWindowState;
 use super::range_control::{
     RangeEndpoint, RangeEndpointPick, RangeTargetMotionMode, ShootingRangeControlState,
 };
 use super::spawn_selection::{SpawnSelectionState, top_down_world_xz};
-use super::DebugWindowState;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RuneUiAction {
@@ -61,9 +61,8 @@ pub fn scene_mode_controls_panel(
     let override_enabled = rune_control.override_enabled();
     let endpoint_pick = range_control.endpoint_pick;
     let spawn_selection_active = spawn_selection.active;
-    let target_online = |kind: ShootingRangeTargetKind| {
-        targets.iter().any(|target| target.kind == kind)
-    };
+    let target_online =
+        |kind: ShootingRangeTargetKind| targets.iter().any(|target| target.kind == kind);
 
     let mut rune_action: Option<RuneUiAction> = None;
     let mut pick_request: Option<RangeEndpointPick> = None;
@@ -98,7 +97,10 @@ pub fn scene_mode_controls_panel(
                     ui.label("Spawn selection (F1) is active; endpoint picking is disabled.");
                 }
 
-                for kind in [ShootingRangeTargetKind::Armor3, ShootingRangeTargetKind::Armor1] {
+                for kind in [
+                    ShootingRangeTargetKind::Armor3,
+                    ShootingRangeTargetKind::Armor1,
+                ] {
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(kind.label()).strong());
@@ -163,7 +165,10 @@ pub fn scene_mode_controls_panel(
                             ui.monospace(format!("{}:", endpoint_label(endpoint)));
                             match value {
                                 Some(position) => {
-                                    ui.monospace(format!("x {:.2}  z {:.2}", position.x, position.z));
+                                    ui.monospace(format!(
+                                        "x {:.2}  z {:.2}",
+                                        position.x, position.z
+                                    ));
                                 }
                                 None => {
                                     ui.monospace("not set");
@@ -176,10 +181,7 @@ pub fn scene_mode_controls_panel(
                                 )
                                 .clicked()
                             {
-                                pick_request = Some(RangeEndpointPick {
-                                    kind,
-                                    endpoint,
-                                });
+                                pick_request = Some(RangeEndpointPick { kind, endpoint });
                             }
                             if value.is_some() && ui.small_button("clear").clicked() {
                                 match endpoint {
@@ -229,14 +231,10 @@ pub fn scene_mode_controls_panel(
                 let mode = rune_control.active_mode().unwrap_or_else(|| state.mode());
                 let mut states = state.target_states();
                 states[index] = next_blade_activation(states[index]);
-                let pending = target_indices(&states, |activation| {
-                    activation == Activation::Activating
-                });
+                let pending =
+                    target_indices(&states, |activation| activation == Activation::Activating);
                 let activated = target_indices(&states, |activation| {
-                    matches!(
-                        activation,
-                        Activation::Activated | Activation::Completed
-                    )
+                    matches!(activation, Activation::Activated | Activation::Completed)
                 });
                 apply_scene_control_power_rune_state(
                     Some(mode),
@@ -362,8 +360,7 @@ fn rune_controls(
             for (index, activation) in snapshot.target_states().iter().enumerate() {
                 let (label, fill) = blade_style(*activation);
                 let button = egui::Button::new(
-                    egui::RichText::new(format!("{index}\n{label}"))
-                        .color(egui::Color32::BLACK),
+                    egui::RichText::new(format!("{index}\n{label}")).color(egui::Color32::BLACK),
                 )
                 .fill(fill)
                 .min_size(egui::vec2(58.0, 34.0));

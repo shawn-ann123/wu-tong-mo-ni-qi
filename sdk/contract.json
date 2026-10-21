@@ -1,0 +1,112 @@
+{
+  "sdk_version": "2.0.0",
+  "shm_magic": "0x54414C05",
+  "shm_version": 7,
+  "sdk_abi_revision": 2,
+  "image_width": 1440,
+  "image_height": 1080,
+  "image_channels": 3,
+  "shm_image_format": "rgb24",
+  "tcp_image_default_format": "rgba32",
+  "tcp_image_supported_formats": ["rgb24", "rgba32"],
+  "meta_size": 76992,
+  "tcp_image_protocol": 1,
+  "tcp_image_port": 5602,
+  "udp_command_port": 5601,
+  "gimbal_pitch_contract": {
+    "unit": "degree",
+    "level_deg": 0.0,
+    "positive": "up",
+    "negative": "down"
+  },
+  "scene_control_protocol": 2,
+  "scene_control_port": 5603,
+  "runtime_capabilities_file": "daedalus-runtime-capabilities-v1.json",
+  "distribution_profile": "learning",
+  "competition_eligible": false,
+  "future_truth_included": false,
+  "online_ground_truth": {
+    "enabled_by_default": true,
+    "disable_environment_variable": "DAEDALUS_LEARNING_TRUTH=0",
+    "sdk_method": "TalosMetadataReader::readGroundTruthForFrame",
+    "identity": ["producer_epoch", "frame_seq", "timestamp_ns"],
+    "history_slots": 16,
+    "future_truth_included": false,
+    "available_fields": ["target_world_pose", "target_linear_velocity", "target_angular_velocity", "armor_slots", "armor_ids", "armor_visibility", "projected_armor_geometry", "rune_state"]
+  },
+  "fixed_calibration_file": "camera-calibration.json",
+  "offline_exports": {
+    "exact_corner_labels": {
+      "schema_version": "daedalus.offline-exact-corners/1",
+      "schema_file": "schemas/offline-exact-corners-v1.schema.json",
+      "environment_variable": "DAEDALUS_CORNER_LABELS_JSONL",
+      "default_enabled": false,
+      "requires_tcp_client": true,
+      "commit_point": "after_complete_tcp_frame_write",
+      "online_target_truth_enabled": true,
+      "future_truth_included": false
+    },
+    "full_frame_capture": {
+      "schema_version": "daedalus.offline-frame-capture/1",
+      "schema_file": "schemas/offline-frame-capture-v1.schema.json",
+      "collector_option": "--save-rgba-frames",
+      "default_enabled": false,
+      "requires_until_eof": true,
+      "image_format": "rgba32-raw",
+      "online_target_truth_enabled": true,
+      "future_truth_included": false
+    }
+  },
+  "scene_control_operations": [
+    "ping",
+    "create_session",
+    "status",
+    "reset_scene",
+    "set_scene",
+    "set_range_target_motion",
+    "set_range_target_geometry",
+    "set_rune_state",
+    "set_rune_scenario",
+    "get_big_rune_score"
+  ],
+  "learning_profile": {
+    "linux_only": true,
+    "supported_scenes": ["shooting_range", "energy"],
+    "unsupported_scenes": ["armor", "outpost"],
+    "rune_scenario": {
+      "modes": ["small", "large"],
+      "motion": ["rule", "static"],
+      "static_leaf_states": ["deactivated", "activating", "activated", "completed"],
+      "rule_driven_leaves": "simulator-owned",
+      "rotation_direction": "red face clockwise or counter_clockwise; blue face is opposite"
+    },
+    "big_rune_score": {
+      "teams": ["red", "blue"],
+      "applies_to": "valid hits on active large-rune leaves in rule-driven mode",
+      "effective_detection_diameter_mm": 300,
+      "rings": "1 through 10; 10 is centre and 1 is outermost",
+      "returned_fields": ["run_id", "run_active", "activated_arms", "average_ring", "last_ring", "last_radius_mm", "last_target"]
+    },
+    "preferred_cxx_facade": "ContestClient"
+  },
+  "capabilities": [
+    "image_identity",
+    "fixed_calibration",
+    "gimbal_command",
+    "gimbal_actual_state",
+    "frame_synchronized_gimbal_state",
+    "exposure_pose_by_frame",
+    "tcp_image",
+    "scene_control",
+    "big_rune_score",
+    "runtime_capabilities"
+  ],
+  "unsupported_interfaces": [
+    "camera_calibration_setter",
+    "vision_detection_result_upload",
+    "pnp_result_upload",
+    "trajectory_prediction_result_upload",
+    "inference_model_management"
+  ],
+  "consumers": ["auto-aim", "energy-buff"]
+}

@@ -11,6 +11,7 @@ screenshot-*.png
 /dataset/
 /install/
 /log/
+/runtime/
 /build/
 build.sh
 env.sh

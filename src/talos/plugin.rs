@@ -12,7 +12,6 @@ use crate::talos::capture::{
 use crate::talos::tcp_image::{TcpImageSender, TcpImageSenderConfig, mark_file_image_transport};
 use crate::telemetry::PendingAutoAimShotContext;
 use bevy::ecs::system::RunSystemOnce;
-use bevy::image::BevyDefault;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use std::net::SocketAddr;
@@ -350,7 +349,10 @@ fn process_subscription(
         return;
     }
     let yaw_f32 = (cmd.yaw_deg).to_radians();
-    let pitch_f32 = (-cmd.pitch_deg - 90.0).to_radians();
+    let pitch_f32 = cmd.pitch_deg.to_radians().clamp(
+        -config.vehicle.gimbal_pitch_limit,
+        config.vehicle.gimbal_pitch_limit,
+    );
     if should_launch_from_talos_cmd(&cmd) {
         commands.insert_resource(PendingAutoAimShotContext {
             yaw_deg: Some(cmd.yaw_deg),

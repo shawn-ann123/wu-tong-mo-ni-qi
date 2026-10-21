@@ -8,7 +8,6 @@ mod dataset;
 mod frames;
 mod gpu_selector;
 mod handler;
-mod integrated_auto_aim;
 mod network_bridge;
 mod robomaster;
 mod scene_control;
@@ -30,7 +29,7 @@ use bevy::prelude::*;
 use bevy::render::RenderSystems;
 use bevy::window::{ExitCondition, PresentMode, WindowPosition, WindowResolution};
 use bevy::winit::{WinitPlugin, WinitSettings};
-use bevy_inspector_egui::bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use clap::Parser;
 use std::path::PathBuf;
@@ -38,17 +37,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::auto_gen::AutoGenPlugin;
+use crate::ballistics_config::BallisticsConfigPlugin;
 use crate::capture::{
     ExposureWallTimestamp, advance_exposure_wall_timestamp, update_preview_cadence,
 };
 use crate::components::{CameraMode, FollowingType, ProjectileCooldown, SubscribeAutoAim};
-use crate::ballistics_config::BallisticsConfigPlugin;
 use crate::config::{ConfigPlugin, SimulationConfig};
 use crate::dataset::prelude::DatasetPlugin;
 use crate::handler::{on_activate, on_hit};
-#[cfg(feature = "talos")]
-use crate::integrated_auto_aim::IntegratedAutoAimPlugin;
-use crate::integrated_auto_aim::configure_integrated_auto_aim_environment;
 use crate::network_bridge::NetworkBridgePlugin;
 use crate::robomaster::prelude::RoboMasterPlugins;
 use crate::scene_control::{
@@ -61,16 +57,16 @@ use crate::setup::{
 use crate::statistic::ProjectileStatistics;
 use crate::systems::{
     ChassisObservationFrame, DebugWindowContextPass, DebugWindowState, GameplaySystems,
-    PreviousKinematicState, SpawnSelectionState, TelemetryWindowState,
-    apply_spawn_position, auto_aim_switch, change_appearance, cleanup_projectiles, dart_launch,
-    export_debug_stats, following_controls, freecam_controls, gimbal_controls,
-    mark_main_schedule_begin, mark_main_schedule_end, mark_physics_step, mark_physics_step_begin,
-    mouse_gimbal_controls, projectile_aerodynamics, projectile_launch, remote_gimbal_controls,
-    remote_vehicle_controls, run_auto_aim_debug_ui_app, scene_mode_control_panel,
-    scene_mode_controls_panel, scene_mode_keyboard_shortcuts, screenshot_on_f2,
-    screenshot_saving, setup_debug_window, setup_projectile, shooting_range_control_window,
-    shooting_range_debug_panel, shooting_range_endpoint_pick, spawn_scene_mode_button_panel,
-    spawn_click_detection, spawn_cursor_tracking, spawn_selection_init, spawn_selection_ui,
+    PreviousKinematicState, SpawnSelectionState, TelemetryWindowState, apply_spawn_position,
+    auto_aim_switch, change_appearance, cleanup_projectiles, dart_launch, export_debug_stats,
+    following_controls, freecam_controls, gimbal_controls, mark_main_schedule_begin,
+    mark_main_schedule_end, mark_physics_step, mark_physics_step_begin, mouse_gimbal_controls,
+    projectile_aerodynamics, projectile_launch, remote_gimbal_controls, remote_vehicle_controls,
+    run_auto_aim_debug_ui_app, scene_mode_control_panel, scene_mode_controls_panel,
+    scene_mode_keyboard_shortcuts, screenshot_on_f2, screenshot_saving, setup_debug_window,
+    setup_projectile, shooting_range_control_window, shooting_range_debug_panel,
+    shooting_range_endpoint_pick, spawn_click_detection, spawn_cursor_tracking,
+    spawn_scene_mode_button_panel, spawn_selection_init, spawn_selection_ui,
     switch_slapper_control, telemetry_window_system, toggle_debug_window,
     toggle_shooting_range_control_window, top_down_camera_system, uav_launch,
     update_chassis_observation, update_frequency_metrics, update_help_text, vehicle_controls,
@@ -358,6 +354,8 @@ fn performance_ui_disabled() -> bool {
 
 #[cfg(feature = "talos")]
 fn should_enable_talos_plugin(app: &App) -> bool {
+    #[cfg(not(feature = "ros2"))]
+    let _ = app;
     #[cfg(feature = "ros2")]
     let ros_capture_active = app
         .world()
@@ -417,7 +415,6 @@ fn main() {
 
     // Full simulation mode: existing functionality
     let config = SimulationConfig::default();
-    configure_integrated_auto_aim_environment(&config);
     let initial_scene_mode = initial_auto_aim_scene_mode(&config);
     let truth_gimbal_config = ShootingRangeTruthGimbalConfig::from_env();
     let truth_gimbal_stats = ShootingRangeTruthGimbalStats::from_config(truth_gimbal_config);
@@ -497,7 +494,7 @@ fn main() {
             config.projectile.cooldown,
             TimerMode::Once,
         )))
-        .add_systems(Startup, (setup, setup_projectile, setup_debug_window))
+        .add_systems(Startup, (setup, setup_projectile))
         .add_systems(
             Startup,
             spawn_scene_mode_button_panel.run_if(|| !performance_ui_disabled()),
@@ -559,9 +556,11 @@ fn main() {
                 // Camera phase
                 (
                     freecam_controls.run_if(|mode: Res<CameraMode>| mode.0 == FollowingType::Free),
-                    top_down_camera_system.run_if(|mode: Res<CameraMode>| mode.0 == FollowingType::TopDown),
-                    systems::update_camera_follow
-                        .run_if(|mode: Res<CameraMode>| mode.0 != FollowingType::Free && mode.0 != FollowingType::TopDown),
+                    top_down_camera_system
+                        .run_if(|mode: Res<CameraMode>| mode.0 == FollowingType::TopDown),
+                    systems::update_camera_follow.run_if(|mode: Res<CameraMode>| {
+                        mode.0 != FollowingType::Free && mode.0 != FollowingType::TopDown
+                    }),
                     apply_spawn_position,
                 )
                     .in_set(GameplaySystems::Camera)
@@ -614,6 +613,7 @@ fn main() {
         .add_systems(FixedUpdate, projectile_aerodynamics);
 
     if !disable_performance_ui {
+        app.add_systems(Startup, setup_debug_window);
         app.add_systems(
             DebugWindowContextPass,
             (
@@ -647,7 +647,6 @@ fn main() {
 
     #[cfg(feature = "talos")]
     {
-        app.add_plugins(IntegratedAutoAimPlugin);
         if should_enable_talos_plugin(&app) {
             app.add_plugins(TalosPlugin::default());
             info!("talos integration enabled");
