@@ -24,7 +24,7 @@ pub fn uav_launch(
     if keyboard.just_pressed(KeyCode::KeyP) {
         info!("UAV launch requested");
     }
-    let mut timer = timer.get_or_insert(Timer::from_seconds(1.0, TimerMode::Once));
+    let timer = timer.get_or_insert(Timer::from_seconds(1.0, TimerMode::Once));
     timer.tick(time.delta());
     if !timer.is_finished() {
         return;

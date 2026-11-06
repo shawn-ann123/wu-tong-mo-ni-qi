@@ -555,7 +555,6 @@ mod tests {
         capture_max_hz_from_value, env_flag_enabled, prepare_extracted_pose,
         talos_frame_dimensions_valid,
     };
-    use crate::capture::driver::GpuCaptureHandler;
     use crate::talos::tcp_image::{HEADER_BYTES, TcpImageSender, TcpImageSenderConfig};
     use bevy::prelude::World;
     use std::io::Read;

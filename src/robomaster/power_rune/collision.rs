@@ -1,6 +1,7 @@
 use crate::robomaster::power_rune::common::RuneHitOutcome;
 use crate::robomaster::power_rune::rotation::PowerRuneRotation;
 use crate::robomaster::power_rune::rune::{PowerRune, PowerRuneMechanism};
+use crate::robomaster::power_rune::score::BigRuneScores;
 use crate::telemetry::{
     ProjectileImpactRecorded, ProjectileKinematics, ProjectileTelemetry, ProjectileTrace,
     RuneTargetSnapshot,
@@ -9,7 +10,7 @@ use avian3d::prelude::LinearVelocity;
 use avian3d::prelude::{CollisionEnd, CollisionEventsEnabled};
 use bevy::prelude::{
     ChildOf, Commands, Component, Entity, EntityEvent, GlobalTransform, On, Query, Res, ResMut,
-    Resource, Transform, Update, With,
+    Resource, Transform, Update, Vec3, With,
 };
 use std::collections::HashSet;
 
@@ -55,6 +56,7 @@ fn handle_rune_collision(
     mut commands: Commands,
     mut consumed_projectiles: ResMut<ConsumedRuneProjectiles>,
     telemetry: Res<ProjectileTelemetry>,
+    mut scores: ResMut<BigRuneScores>,
     mut runes: Query<(
         &mut PowerRuneMechanism,
         &mut PowerRuneRotation,
@@ -97,10 +99,8 @@ fn handle_rune_collision(
             _ => return,
         };
 
-    let target_position_m = transforms
-        .get(target_collider)
-        .ok()
-        .map(GlobalTransform::translation);
+    let target_transform = transforms.get(target_collider).ok();
+    let target_position_m = target_transform.map(GlobalTransform::translation);
 
     let Some(target) = find_rune_target(target_collider, &targets, &child_of) else {
         return;
@@ -120,6 +120,7 @@ fn handle_rune_collision(
         .insert(ProjectileImpactRecorded);
 
     let mut rng = rand::thread_rng();
+    let rule_driven_large = mechanism.state().is_rule_driven_large();
     let outcome = mechanism.state_mut().hit(target.target, &mut rng);
     rotation.sync_activation(
         mechanism.state().mode(),
@@ -145,6 +146,19 @@ fn handle_rune_collision(
         outcome.activates_rune(),
     );
 
+    if rule_driven_large && outcome.is_accurate() {
+        if let (Some(projectile_transform), Some(target_transform)) =
+            (projectile_data.0, target_transform)
+        {
+            let radius_m = impact_radius_m(
+                projectile_transform.translation,
+                projectile_data.1.map(|velocity| velocity.0),
+                target_transform.translation(),
+            );
+            scores.record_hit(rune.team(), target.target, radius_m);
+        }
+    }
+
     commands.trigger(RuneHit {
         rune: target.rune,
         result: HitResult { outcome },
@@ -153,6 +167,14 @@ fn handle_rune_collision(
     if outcome.activates_rune() {
         commands.trigger(RuneActivated { rune: target.rune });
     }
+}
+
+fn impact_radius_m(projectile: Vec3, velocity: Option<Vec3>, target: Vec3) -> f32 {
+    let Some(direction) = velocity.and_then(Vec3::try_normalize) else {
+        return projectile.distance(target);
+    };
+    let closest_point = projectile + direction * (target - projectile).dot(direction);
+    closest_point.distance(target)
 }
 
 fn cleanup_consumed_rune_projectiles(
@@ -205,6 +227,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(ProjectileStatistics::default());
         app.insert_resource(ProjectileTelemetry::from_env());
+        app.insert_resource(BigRuneScores::default());
         app.init_resource::<ConsumedRuneProjectiles>();
         app.add_observer(handle_rune_collision);
         app.add_observer(on_hit);
@@ -265,5 +288,15 @@ mod tests {
         }
 
         panic!("no active small rune target registered an accurate projectile hit");
+    }
+
+    #[test]
+    fn impact_radius_uses_the_projectile_flight_line() {
+        let radius = impact_radius_m(
+            Vec3::new(0.10, 0.0, 2.0),
+            Some(Vec3::NEG_Z * 30.0),
+            Vec3::ZERO,
+        );
+        assert!((radius - 0.10).abs() < 1e-6);
     }
 }

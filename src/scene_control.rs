@@ -9,8 +9,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::robomaster::prelude::{
-    ManualPowerRuneControlState, PowerRune, PowerRuneMechanism, RUNE_TARGET_COUNT, RuneMode,
-    apply_scene_control_power_rune_state,
+    BigRuneScores, ManualPowerRuneControlState, PowerRune, PowerRuneMechanism, RUNE_TARGET_COUNT,
+    RuneMode, Team, apply_scene_control_power_rune_state,
 };
 use crate::setup::{AutoAimSceneMode, AutoAimSceneState, ShootingRangeTarget};
 use crate::systems::{RangeTargetMotionMode, ShootingRangeControlState};
@@ -77,7 +77,7 @@ impl SceneControlTransport {
                     let _ = socket.send_to(&response.bytes, response.peer);
                 }
             })?;
-        info!("Scene control v1 listening on udp://{local_addr}");
+        info!("Scene control v2 listening on udp://{local_addr}");
         Ok(Self {
             incoming,
             outgoing,
@@ -124,6 +124,8 @@ struct SceneControlResponse {
     applied_frame_seq: u64,
     timestamp_ns: u64,
     message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<Value>,
 }
 
 #[derive(Debug)]
@@ -154,7 +156,7 @@ impl Plugin for SceneControlPlugin {
                 app.insert_resource(transport);
             }
             Err(error) => {
-                error!("Scene control v1 failed to bind UDP socket: {error}");
+                error!("Scene control v2 failed to bind UDP socket: {error}");
             }
         }
     }
@@ -166,6 +168,7 @@ pub fn receive_scene_control_commands(
     mut scene_state: ResMut<AutoAimSceneState>,
     mut range_state: ResMut<ShootingRangeControlState>,
     mut rune_control: ResMut<ManualPowerRuneControlState>,
+    scores: Res<BigRuneScores>,
     mut runes: Query<(&mut PowerRune, &mut PowerRuneMechanism)>,
 ) {
     runtime.frame_seq = runtime.frame_seq.saturating_add(1).max(1);
@@ -406,6 +409,26 @@ pub fn receive_scene_control_commands(
                     message,
                 ),
             },
+            "get_big_rune_score" => {
+                match string_arg(&request.args, "team").ok().and_then(Team::from) {
+                    Some(team) => send_ok_with_data(
+                        &transport,
+                        datagram.peer,
+                        &request,
+                        runtime.frame_seq,
+                        "big rune score",
+                        serde_json::to_value(scores.get(team)).unwrap_or(Value::Null),
+                    ),
+                    None => send_status(
+                        &transport,
+                        datagram.peer,
+                        &request,
+                        ResponseStatus::InvalidRequest,
+                        runtime.frame_seq,
+                        "args.team must be red or blue",
+                    ),
+                }
+            }
             _ => send_status(
                 &transport,
                 datagram.peer,
@@ -613,6 +636,7 @@ fn response(
         applied_frame_seq: frame_seq,
         timestamp_ns: now_ns(),
         message: message.into(),
+        data: None,
     }
 }
 
@@ -673,6 +697,25 @@ fn send_ok(
     );
 }
 
+fn send_ok_with_data(
+    transport: &SceneControlTransport,
+    peer: SocketAddr,
+    request: &SceneControlRequest,
+    frame_seq: u64,
+    message: impl Into<String>,
+    data: Value,
+) {
+    let mut response = response(
+        request.command_id,
+        request.session_id.clone(),
+        ResponseStatus::Ok,
+        frame_seq,
+        message,
+    );
+    response.data = Some(data);
+    send_response(transport, peer, response);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,5 +759,24 @@ mod tests {
         }))
         .unwrap();
         assert!(parse_rune_state(&rune).is_ok());
+    }
+
+    #[test]
+    fn response_can_carry_big_rune_score_data() {
+        let mut response = response(9, "session".into(), ResponseStatus::Ok, 12, "score");
+        response.data = Some(serde_json::json!({
+            "team": "red",
+            "run_id": 3,
+            "run_active": true,
+            "activated_arms": 2,
+            "has_hit": true,
+            "average_ring": 7.5,
+            "last_ring": 5,
+            "last_radius_mm": 75,
+            "last_target": 3
+        }));
+        let encoded = serde_json::to_value(response).unwrap();
+        assert_eq!(encoded["data"]["average_ring"], 7.5);
+        assert_eq!(encoded["data"]["last_target"], 3);
     }
 }

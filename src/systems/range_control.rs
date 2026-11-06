@@ -1191,7 +1191,7 @@ fn draw_chart(
     painter.rect_stroke(
         rect,
         4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(70, 76, 82)),
+        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(70, 76, 82)),
         egui::StrokeKind::Inside,
     );
 
@@ -1249,7 +1249,7 @@ fn draw_chart(
             }
             let point = to_pos(sample, value);
             if let Some(prev) = previous {
-                painter.line_segment([prev, point], egui::Stroke::new(1.6, item.color));
+                painter.line_segment([prev, point], egui::Stroke::new(1.6_f32, item.color));
             }
             previous = Some(point);
         }
@@ -1309,7 +1309,7 @@ fn mode_button(ui: &mut egui::Ui, requested: &mut AutoAimSceneMode, mode: AutoAi
     if ui
         .add_sized(
             [138.0, 28.0],
-            egui::SelectableLabel::new(*requested == mode, mode.label()),
+            egui::Button::selectable(*requested == mode, mode.label()),
         )
         .clicked()
     {

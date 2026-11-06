@@ -19,8 +19,8 @@ use crate::components::{
 use crate::config::ArenaBoundaryConfig;
 use crate::config::SimulationConfig;
 use crate::robomaster::prelude::{
-    HERO_ROBOT_CONFIG, INFANTRY_THREE_CONFIG, OutpostRoot, PowerRuneRoot, Projectile, RobotConfig,
-    ScanArmor, Team, TechCoreRoot,
+    BigRuneScores, HERO_ROBOT_CONFIG, INFANTRY_THREE_CONFIG, OutpostRoot, PowerRuneRoot,
+    Projectile, RobotConfig, ScanArmor, Team, TechCoreRoot,
 };
 use crate::robomaster::vehicle::movement::VehicleDynamic;
 use crate::statistic::ProjectileStatistics;
@@ -823,6 +823,7 @@ pub fn apply_auto_aim_scene_mode_request(
     scene_entities: Query<Entity, With<SceneScoped>>,
     projectiles: Query<Entity, With<Projectile>>,
     mut stats: ResMut<ProjectileStatistics>,
+    mut rune_scores: ResMut<BigRuneScores>,
     capture_scene_profile: Option<Res<CaptureSceneProfile>>,
 ) {
     if !scene_state.is_switch_pending() {
@@ -838,6 +839,7 @@ pub fn apply_auto_aim_scene_mode_request(
     }
 
     *stats = ProjectileStatistics::default();
+    rune_scores.reset_all();
     scene_state.current = next_mode;
     scene_state.force_rebuild = false;
     scene_state.generation = scene_state.generation.saturating_add(1);

@@ -257,6 +257,17 @@ impl MechanismState {
         )
     }
 
+    pub fn is_rule_driven_large(&self) -> bool {
+        matches!(
+            self,
+            Self::Activating(ActivationRun {
+                global_remaining,
+                round: ActivationRound::Large(_),
+                ..
+            }) if global_remaining.is_finite()
+        )
+    }
+
     pub fn large_progress(&self) -> Option<usize> {
         match self {
             Self::Activating(run) => run.large_progress(),

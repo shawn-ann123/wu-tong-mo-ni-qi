@@ -4,6 +4,9 @@ use bevy_inspector_egui::egui;
 
 use super::DebugWindowState;
 use crate::components::{Controlled, Infantry, InfantryGimbal};
+use crate::robomaster::prelude::{BigRuneScores, Team};
+use crate::setup::{AutoAimSceneMode, AutoAimSceneState};
+use crate::statistic::ProjectileStatistics;
 
 #[derive(Resource)]
 pub struct TelemetryWindowState {
@@ -16,6 +19,17 @@ impl Default for TelemetryWindowState {
     }
 }
 
+fn shows_hit_rate(mode: AutoAimSceneMode) -> bool {
+    matches!(
+        mode,
+        AutoAimSceneMode::Armor | AutoAimSceneMode::ShootingRange
+    )
+}
+
+fn shows_average_ring(mode: AutoAimSceneMode) -> bool {
+    matches!(mode, AutoAimSceneMode::Armor | AutoAimSceneMode::Energy)
+}
+
 pub fn telemetry_window_system(
     mut contexts: EguiContexts,
     gimbal_query: Query<(&Transform, &InfantryGimbal), With<Controlled>>,
@@ -23,6 +37,9 @@ pub fn telemetry_window_system(
     mut state: ResMut<TelemetryWindowState>,
     debug_window: Res<DebugWindowState>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    scene: Res<AutoAimSceneState>,
+    stats: Res<ProjectileStatistics>,
+    rune_scores: Res<BigRuneScores>,
 ) {
     if keyboard.just_pressed(KeyCode::F4) {
         state.enabled = !state.enabled;
@@ -103,10 +120,58 @@ pub fn telemetry_window_system(
                         ui.monospace(format!("{:.4} rad", gimbal_data.pitch));
                         ui.end_row();
                     }
+
+                    if shows_hit_rate(scene.current) {
+                        ui.label("Hit Rate");
+                        ui.monospace(format!(
+                            "{:.1}%  ({} / {})",
+                            stats.accurate_pct() * 100.0,
+                            stats.accurate_count,
+                            stats.launch_count
+                        ));
+                        ui.end_row();
+                    }
+
+                    if shows_average_ring(scene.current) {
+                        for (label, team) in [
+                            ("Average Ring (Red)", Team::Red),
+                            ("Average Ring (Blue)", Team::Blue),
+                        ] {
+                            let score = rune_scores.get(team);
+                            ui.label(label);
+                            ui.monospace(format!(
+                                "{:.2}  ({} hits{})",
+                                score.average_ring,
+                                score.activated_arms,
+                                if score.run_active { ", active" } else { "" }
+                            ));
+                            ui.end_row();
+                        }
+                    }
                 });
 
             if gimbal_query.iter().next().is_none() && chassis_query.iter().next().is_none() {
                 ui.label("No controlled vehicle found");
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scene_metrics_match_the_truth_panel_contract() {
+        assert!(shows_hit_rate(AutoAimSceneMode::ShootingRange));
+        assert!(!shows_average_ring(AutoAimSceneMode::ShootingRange));
+
+        assert!(!shows_hit_rate(AutoAimSceneMode::Energy));
+        assert!(shows_average_ring(AutoAimSceneMode::Energy));
+
+        assert!(shows_hit_rate(AutoAimSceneMode::Armor));
+        assert!(shows_average_ring(AutoAimSceneMode::Armor));
+
+        assert!(!shows_hit_rate(AutoAimSceneMode::Outpost));
+        assert!(!shows_average_ring(AutoAimSceneMode::Outpost));
+    }
 }
